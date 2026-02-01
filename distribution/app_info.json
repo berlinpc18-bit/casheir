@@ -1,0 +1,24 @@
+{
+  "app_info": {
+    "name": "تطبيق إدارة الكاشير",
+    "version": "1.0.0",
+    "build_date": "2025-10-07",
+    "platform": "Windows x64",
+    "developer": "مطور Flutter",
+    "description": "نظام إدارة شامل للمقاهي والمطاعم"
+  },
+  "features": [
+    "إدارة الطلبات والحجوزات",
+    "نظام طابعات متقدم",
+    "إحصائيات مالية",
+    "إدارة الأجهزة والأسعار",
+    "أقسام مخصصة",
+    "نسخ احتياطية"
+  ],
+  "system_requirements": {
+    "os": "Windows 10+",
+    "ram": "4 GB minimum",
+    "storage": "500 MB free space",
+    "processor": "x64 compatible"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "dart.analysisExcludedFolders": [
+    ".dart_tool",
+    "build"
+  ],
+  "dart.showLintNames": false,
+  "dart.showInspectorNotificationsForWidgetErrors": false,
+  "dart.previewLsp": false,
+  "dart.analysisServerFolding": false,
+  "dart.enableSdkFormatter": true,
+  "dart.lineLength": 120,
+  "dart.insertArgumentPlaceholders": false,
+  "dart.completeFunctionCalls": false,
+  "dart.enableSnippets": false,
+  "editor.formatOnSave": false,
+  "dart.enableCompletionCommitCharacters": false,
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/node_modules/*/**": true,
+    "**/.dart_tool/**": true,
+    "**/build/**": true
+  }
+}

@@ -1,0 +1,73 @@
+name: berlin_gaming_cashier
+description: "تطبيق كاشير صالة ألعاب إلكترونية."
+publish_to: 'none' # لإبقاء المشروع خاص
+
+version: 1.0.0
+
+environment:
+  sdk: ">=2.18.0 <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: ^6.0.5
+  wave: ^0.2.2
+  animations: ^2.0.8
+  intl: ^0.20.2
+
+  # التخزين المحلي للحجوزات (استخدم Hive فقط) 
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  
+  # إدارة النوافذ للشاشة الكاملة
+  window_manager: ^0.3.7
+  path_provider: ^2.0.15
+  
+  # نظام حفظ احتياطي
+  shared_preferences: ^2.2.2
+  
+  # فتح الروابط الخارجية
+  url_launcher: ^6.2.2
+
+  # أيقونات iOS
+  cupertino_icons: ^1.0.8
+  animated_background: ^2.0.0
+  particles_flutter: ^1.0.1
+  simple_animations: ^5.2.0
+
+  # مكتبة الطباعة على ويندوز
+  printing: ^5.12.0
+  
+  # مكتبة تشغيل الأصوات
+  audioplayers: ^6.0.0
+  
+  # مكتبة التشفير لحماية الترخيص
+  crypto: ^3.0.3
+  
+  # مكتبة اختيار الملفات (للوغو)
+  file_picker: ^8.0.0
+  
+  # مكتبات المزامنة والشبكات
+  # firebase_core: ^2.24.0
+  # firebase_database: ^10.2.0
+  connectivity_plus: ^5.0.0
+  uuid: ^4.0.0
+  web_socket_channel: ^2.4.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.4.6
+  hive_generator: ^2.0.1
+
+flutter:
+  uses-material-design: true
+  assets:
+  - assets/pc.png
+  - assets/arabia.png
+  - assets/table.png
+  - assets/billiard.png
+  - assets/re.png
+  - assets/sounds/
+  - assets/logo.png
