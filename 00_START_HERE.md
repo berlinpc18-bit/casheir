@@ -11,7 +11,7 @@
 | الملف | الحجم | الوصف |
 |------|------|------|
 | `lib/sync_service.dart` | 520 سطر | خدمة المزامنة الأساسية |
-| `lib/local_network_sync_service.dart` | 340 سطر | مزامنة الشبكة المحلية UDP |
+| `lib/local _network_sync_service.dart` | 340 سطر | مزامنة الشبكة المحلية UDP |
 | `lib/device_group_manager.dart` | 420 سطر | مدير مجموعة الأجهزة |
 | `lib/device_group_screen.dart` | 680 سطر | واجهة إدارة المجموعة |
 | `lib/smart_sync_config.dart` | 380 سطر | إعدادات وتكوين النظام |
