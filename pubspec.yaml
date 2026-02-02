@@ -15,9 +15,6 @@ dependencies:
   animations: ^2.0.8
   intl: ^0.20.2
 
-  # التخزين المحلي للحجوزات (استخدم Hive فقط) 
-  hive: ^2.2.3
-  hive_flutter: ^1.1.0
   
   # إدارة النوافذ للشاشة الكاملة
   window_manager: ^0.3.7
@@ -59,7 +56,6 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
   build_runner: ^2.4.6
-  hive_generator: ^2.0.1
 
 flutter:
   uses-material-design: true

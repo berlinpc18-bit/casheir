@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'app_state.dart';
+import 'api_sync_manager.dart';
 
 class CustomCategoryScreen extends StatefulWidget {
   final String categoryName;
@@ -17,7 +18,33 @@ class _CustomCategoryScreenState extends State<CustomCategoryScreen> {
   @override
   void initState() {
     super.initState();
-    _loadExistingItems();
+    // Sync categories from API
+    _syncAndLoad();
+  }
+
+  Future<void> _syncAndLoad() async {
+    try {
+      final appState = Provider.of<AppState>(context, listen: false);
+      await ApiSyncManager().syncCategories(appState);
+    } catch (e) {
+      print('Error syncing categories: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('⚠️ خطأ في تحميل الأقسام من الخادم - استخدام البيانات المحلية'),
+            backgroundColor: Colors.red.withOpacity(0.7),
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'إعادة محاولة',
+              onPressed: _syncAndLoad,
+              textColor: Colors.amber,
+            ),
+          ),
+        );
+      }
+    } finally {
+      _loadExistingItems();
+    }
   }
 
   void _loadExistingItems() {

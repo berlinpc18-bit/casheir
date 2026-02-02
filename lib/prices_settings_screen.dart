@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'app_state.dart';
+import 'api_sync_manager.dart';
 
 class PricesSettingsScreen extends StatefulWidget {
   const PricesSettingsScreen({super.key});
@@ -29,8 +30,39 @@ class _PricesSettingsScreenState extends State<PricesSettingsScreen> with Single
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
-    _initializeAllControllers();
-    _loadCurrentPrices();
+    _syncPricesFromApi().then((_) {
+      _initializeAllControllers();
+      _loadCurrentPrices();
+    });
+  }
+
+  Future<void> _syncPricesFromApi() async {
+    try {
+      final appState = Provider.of<AppState>(context, listen: false);
+      final apiSync = ApiSyncManager();
+      await apiSync.syncPrices(appState);
+    } catch (e) {
+      print('Error syncing prices: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('⚠️ خطأ في تحميل الأسعار من الخادم - استخدام البيانات المحلية'),
+            backgroundColor: Colors.red.withOpacity(0.7),
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'إعادة محاولة',
+              onPressed: () {
+                _syncPricesFromApi().then((_) {
+                  _initializeAllControllers();
+                  _loadCurrentPrices();
+                });
+              },
+              textColor: Colors.amber,
+            ),
+          ),
+        );
+      }
+    }
   }
 
   void _initializeAllControllers() {

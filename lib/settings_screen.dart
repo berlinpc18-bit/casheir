@@ -12,7 +12,8 @@ import 'debts_screen.dart';
 import 'prices_settings_screen.dart';
 import 'device_management_screen.dart';
 import 'sound_service.dart';
-
+import 'api_client.dart';
+import 'api_sync_manager.dart';
 import 'printer_settings_screen.dart';
 import 'license_manager.dart';
 import 'backup_management_screen.dart';
@@ -32,6 +33,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final TextEditingController _juicesPriceController = TextEditingController();
   final TextEditingController _snacksPriceController = TextEditingController();
   final TextEditingController _gamesPriceController = TextEditingController();
+  
+  // API Server Configuration
+  late TextEditingController _apiServerController;
+  bool _useApiData = true; // Toggle to use API or local Hive data
 
   // إعدادات النظام
   bool _autoStart = true;
@@ -50,8 +55,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _loadCurrentPrices();
-
+    _apiServerController = TextEditingController(text: ApiClient().baseUrl);
     _soundEffects = SoundService().soundEnabled;
+    _useApiData = ApiSyncManager().isApiEnabled; // Load current API setting
   }
 
 
@@ -74,6 +80,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _juicesPriceController.dispose();
     _snacksPriceController.dispose();
     _gamesPriceController.dispose();
+    _apiServerController.dispose();
     super.dispose();
   }
 
@@ -244,6 +251,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             
             // إعدادات الصوت
             _buildSoundSection(),
+            const SizedBox(height: 24),
+            
+            // إعدادات خادم API
+            _buildApiServerSection(),
             const SizedBox(height: 24),
             
             // معلومات الترخيص
@@ -601,6 +612,170 @@ class _SettingsScreenState extends State<SettingsScreen> {
         builder: (context) => const PricesSettingsScreen(),
       ),
     );
+  }
+
+  Future<void> _saveApiServerUrl() async {
+    final newUrl = _apiServerController.text.trim();
+    
+    // التحقق من صحة الـ URL
+    if (newUrl.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('❌ يرجى إدخال عنوان خادم صحيح'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return;
+    }
+
+    // التحقق من أن الـ URL يبدأ بـ http:// أو https://
+    if (!newUrl.startsWith('http://') && !newUrl.startsWith('https://')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('❌ يجب أن يبدأ العنوان بـ http:// أو https://'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return;
+    }
+
+    try {
+      // تحديث الـ API client
+      ApiClient().setBaseUrl(newUrl);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ تم حفظ عنوان الخادم: $newUrl'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ خطأ في تحديث العنوان: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+    }
+  }
+
+  Future<void> _resetApiServerUrl() async {
+    const defaultUrl = 'http://localhost:8080';
+    _apiServerController.text = defaultUrl;
+    ApiClient().setBaseUrl(defaultUrl);
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('↻ تم إعادة تعيين عنوان الخادم إلى الافتراضي'),
+        backgroundColor: Colors.blue,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _testApiConnection() async {
+    final url = _apiServerController.text.trim();
+    
+    if (url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('❌ يرجى إدخال عنوان خادم'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return;
+    }
+
+    // عرض loading dialog
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        backgroundColor: Theme.of(context).cardColor,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(color: Colors.blue),
+              const SizedBox(height: 16),
+              Text(
+                'اختبار الاتصال بالخادم...',
+                style: TextStyle(
+                  color: Theme.of(context).brightness == Brightness.dark 
+                      ? Colors.white 
+                      : Colors.black,
+                  fontSize: 16,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    try {
+      // تحديث الـ URL مؤقتاً للاختبار
+      final originalUrl = ApiClient().baseUrl;
+      ApiClient().setBaseUrl(url);
+      
+      // محاولة جلب البيانات من الخادم
+      final available = await ApiClient().isServerAvailable();
+      
+      if (!mounted) return;
+      Navigator.of(context).pop(); // إغلاق loading dialog
+
+      if (available) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('✅ الخادم يعمل بشكل صحيح'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      } else {
+        // إعادة الـ URL الأصلي
+        ApiClient().setBaseUrl(originalUrl);
+        _apiServerController.text = originalUrl;
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('❌ الخادم لا يستجيب. تم إعادة العنوان السابق'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop(); // إغلاق loading dialog
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ خطأ في الاتصال: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+    }
   }
 
   void _showDeviceManagementScreen() {
@@ -1029,6 +1204,252 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
 
 
+
+  Widget _buildApiServerSection() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.blue.withOpacity(0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.storage_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Text(
+                'إعدادات خادم API',
+                style: TextStyle(
+                  color: Theme.of(context).brightness == Brightness.dark 
+                      ? Colors.white 
+                      : Colors.black,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'عنوان الخادم',
+            style: TextStyle(
+              color: Theme.of(context).brightness == Brightness.dark 
+                  ? Colors.white 
+                  : Colors.black,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _apiServerController,
+            style: TextStyle(
+              color: Theme.of(context).brightness == Brightness.dark 
+                  ? Colors.white 
+                  : Colors.black,
+              fontSize: 14,
+            ),
+            decoration: InputDecoration(
+              hintText: 'مثال: http://localhost:8080',
+              hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+              prefixIcon: const Icon(Icons.language, color: Colors.blue),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.blue.withOpacity(0.3)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.blue.withOpacity(0.3)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Colors.blue, width: 2),
+              ),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.05),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _saveApiServerUrl,
+                  icon: const Icon(Icons.save_rounded),
+                  label: const Text('حفظ'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _resetApiServerUrl,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('إعادة تعيين'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.blue,
+                    side: const BorderSide(color: Colors.blue),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _testApiConnection,
+              icon: const Icon(Icons.cloud_queue_rounded),
+              label: const Text('اختبار الاتصال'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.green,
+                side: const BorderSide(color: Colors.green),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.blue.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.blue.withOpacity(0.3)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_rounded, color: Colors.blue, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'تغيير عنوان الخادم سيتم تطبيقه فوراً',
+                    style: TextStyle(
+                      color: Colors.blue,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          // Toggle: Use API or Local Data
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _useApiData ? Icons.cloud_rounded : Icons.storage_rounded,
+                  color: _useApiData ? Colors.blue : Colors.orange,
+                  size: 24,
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'مصدر البيانات',
+                        style: TextStyle(
+                          color: Theme.of(context).brightness == Brightness.dark 
+                              ? Colors.white 
+                              : Colors.black,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _useApiData 
+                            ? '☁️ جلب البيانات من الخادم (API)'
+                            : '💾 جلب البيانات من الذاكرة المحلية (Hive)',
+                        style: TextStyle(
+                          color: Theme.of(context).brightness == Brightness.dark 
+                              ? Colors.white70 
+                              : Colors.black54,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _useApiData,
+                  onChanged: (value) {
+                    setState(() {
+                      _useApiData = value;
+                      // Apply the setting to ApiSyncManager
+                      ApiSyncManager().setApiEnabled(value);
+                    });
+                    
+                    // Show confirmation
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          value 
+                              ? '☁️ سيتم جلب البيانات من الخادم'
+                              : '💾 سيتم جلب البيانات من الذاكرة المحلية'
+                        ),
+                        backgroundColor: value ? Colors.blue : Colors.orange,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                  activeColor: Colors.blue,
+                  activeTrackColor: Colors.blue.withOpacity(0.3),
+                  inactiveThumbColor: Colors.orange,
+                  inactiveTrackColor: Colors.orange.withOpacity(0.3),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildLicenseSection() {
     return FutureBuilder<Map<String, dynamic>?>(

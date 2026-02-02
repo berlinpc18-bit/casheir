@@ -1,22 +1,10 @@
-import 'package:hive/hive.dart';
+// Server-only mode: Hive removed from statistics models
 
-part 'statistics_models.g.dart';
-
-@HiveType(typeId: 10)
-class DayStatistics extends HiveObject {
-  @HiveField(0)
+class DayStatistics {
   String dayName;
-  
-  @HiveField(1)
   DateTime date;
-  
-  @HiveField(2)
   Map<String, OrderStatistic> orders;
-  
-  @HiveField(3)
   double totalAmount;
-  
-  @HiveField(4)
   int totalQuantity;
 
   DayStatistics({
@@ -39,24 +27,12 @@ class DayStatistics extends HiveObject {
   }
 }
 
-@HiveType(typeId: 11)
-class OrderStatistic extends HiveObject {
-  @HiveField(0)
+class OrderStatistic {
   String itemName;
-  
-  @HiveField(1)
   int quantity;
-  
-  @HiveField(2)
   double unitPrice;
-  
-  @HiveField(3)
   double totalPrice;
-  
-  @HiveField(4)
   DateTime firstOrderTime;
-  
-  @HiveField(5)
   DateTime lastOrderTime;
 
   OrderStatistic({

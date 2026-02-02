@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'app_state.dart';
+import 'api_sync_manager.dart';
 
 enum DeviceType { PC, PS4, Table, Billiard }
 
@@ -20,6 +21,34 @@ class _DeviceManagementScreenState extends State<DeviceManagementScreen> {
   void dispose() {
     _deviceNameController.dispose();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Sync devices from API on screen open
+    Future.microtask(() {
+      final appState = Provider.of<AppState>(context, listen: false);
+      ApiSyncManager().syncDevices(appState).catchError((e) {
+        print('Error syncing devices: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('⚠️ خطأ في تحميل الأجهزة من الخادم - استخدام البيانات المحلية'),
+              backgroundColor: Colors.red.withOpacity(0.7),
+              duration: const Duration(seconds: 4),
+              action: SnackBarAction(
+                label: 'إعادة محاولة',
+                onPressed: () {
+                  ApiSyncManager().syncDevices(appState);
+                },
+                textColor: Colors.amber,
+              ),
+            ),
+          );
+        }
+      });
+    });
   }
 
   String _getTypePrefix(DeviceType type) {

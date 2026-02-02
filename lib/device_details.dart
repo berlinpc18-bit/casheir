@@ -5,6 +5,7 @@ import 'order_dialog.dart';
 import 'order_details.dart';
 import 'print_helper.dart';
 import 'printer_service.dart';
+import 'api_sync_manager.dart';
 
 // دالة للترتيب الطبيعي للأسماء مع الأرقام
 int _naturalSort(String a, String b) {
@@ -182,17 +183,9 @@ class _DeviceDetailsState extends State<DeviceDetails>
         // الحصول على جميع الأجهزة المحفوظة
         final allDevicesFromState = appState.devices.keys.toList();
         
-        // إضافة أجهزة افتراضية إذا لم توجد أجهزة مخصصة
-        final defaultDevices = [
-          ...List.generate(16, (i) => 'Pc ${i + 1}'),
-          ...List.generate(8, (i) => 'Arabia ${i + 1}'),
-          ...List.generate(6, (i) => 'Table ${i + 1}'),
-        ];
-        
-        // دمج الأجهزة المحفوظة مع الافتراضية وإزالة التكرارات
+        // دمج الأجهزة المحفوظة فقط (بدون افتراضية)
         final allDevicesSet = <String>{};
         allDevicesSet.addAll(allDevicesFromState);
-        allDevicesSet.addAll(defaultDevices);
         
         final allDevices = allDevicesSet.where((d) => d != widget.deviceName).toList();
         
@@ -930,7 +923,45 @@ class _OrdersTabState extends State<OrdersTab> {
                 );
                 if (result != null && result.isNotEmpty) {
                   final appState = context.read<AppState>();
-                  appState.addOrders(widget.deviceName, result);
+                  final apiSync = ApiSyncManager();
+                  
+                  try {
+                    // Convert orders to JSON format for API
+                    final orderItems = result.map((order) => {
+                      'name': order.name,
+                      'price': order.price,
+                      'quantity': order.quantity,
+                      'notes': order.notes,
+                      'firstOrderTime': order.firstOrderTime.toIso8601String(),
+                      'lastOrderTime': order.lastOrderTime.toIso8601String(),
+                    }).toList();
+                    
+                    // Place order via API
+                    await apiSync.placeOrderViaApi(
+                      widget.deviceName,
+                      orderItems,
+                    );
+                    
+                    // Sync device orders from API to get latest list
+                    await apiSync.syncDeviceOrders(appState, widget.deviceName);
+                    
+                    // Show success message
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('تم إضافة الطلب بنجاح عبر API')),
+                      );
+                    }
+                  } catch (e) {
+                    // Fallback to local save if API fails
+                    print('API failed, using local save: $e');
+                    appState.addOrders(widget.deviceName, result);
+                    
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('تم إضافة الطلب بنجاح (محلي)')),
+                      );
+                    }
+                  }
                 }
               },
               style: ElevatedButton.styleFrom(

@@ -5,6 +5,7 @@ import 'app_state.dart';
 import 'print_helper.dart';
 import 'printer_service.dart';
 import 'sound_service.dart';
+import 'api_sync_manager.dart';
 
 class OrderDialog extends StatefulWidget {
   final List<OrderItem>? orders;
@@ -159,6 +160,30 @@ class _OrderDialogState extends State<OrderDialog>
     _tabController = TabController(length: categories.keys.length, vsync: this);
     if (widget.orders != null) {
       _selectedOrders.addAll(widget.orders!);
+    }
+    
+    // Sync prices and categories from API when dialog opens
+    _syncCategoriesAndPrices();
+  }
+
+  Future<void> _syncCategoriesAndPrices() async {
+    try {
+      final apiSync = ApiSyncManager();
+      await Future.wait([
+        apiSync.syncPrices(_appState),
+        apiSync.syncCategories(_appState),
+      ]);
+    } catch (e) {
+      print('Error syncing prices and categories: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('⚠️ خطأ في تحميل الأسعار والأقسام من الخادم'),
+            backgroundColor: Colors.red.withOpacity(0.7),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 

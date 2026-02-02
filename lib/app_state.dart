@@ -6,9 +6,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:hive/hive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'data_persistence_manager.dart';
 import 'printer_service.dart';
 
 class OrderItem {
@@ -113,18 +111,18 @@ class DeviceData {
       };
 
   factory DeviceData.fromJson(Map<String, dynamic> json) => DeviceData(
-        name: json['name'],
-        elapsedTime: Duration(seconds: json['elapsedTime']),
-        isRunning: json['isRunning'],
-        orders: (json['orders'] as List)
-            .map((e) => OrderItem.fromJson(e))
-            .toList(),
+        name: json['name'] ?? 'Unknown Device',
+        elapsedTime: Duration(seconds: json['elapsedTime'] ?? 0),
+        isRunning: json['isRunning'] ?? false,
+        orders: (json['orders'] as List?)
+            ?.map((e) => OrderItem.fromJson(e))
+            .toList() ?? [],
         reservations: (json['reservations'] as List? ?? [])
             .map((e) => ReservationItem.fromJson(e))
             .toList(),
         notes: json['notes'] ?? '',
         mode: json['mode'] ?? 'single',
-        customerCount: json['customerCount'] ?? 1, // قراءة العدد
+        customerCount: json['customerCount'] ?? 1,
       );
 }
 
@@ -134,19 +132,11 @@ class AppState extends ChangeNotifier {
   
   // قائمة الأجهزة المحذوفة لتجنب إعادة إنشائها
   Set<String> _deletedDevices = {};
-
   // قائمة الحجوزات المستقلة
   List<ReservationItem> _allReservations = [];
   
   // للتحكم في عمليات الحفظ المتزامنة
   bool _isSaving = false;
-  static bool _isStaticSaving = false; // متغير static للدوال المشتركة
-  static Box? _sharedBox;
-  static bool _isBoxInitialized = false;
-  
-  // 🔄 نظام الحفظ التلقائي الدوري
-  Timer? _autoSaveTimer;
-  DateTime _lastSaveTime = DateTime.now();
   
   // أسعار الأجهزة
   double _pcPrice = 1500.0; // سعر افتراضي عام للـ PC
@@ -161,15 +151,7 @@ class AppState extends ChangeNotifier {
   Map<String, double> _billiardPrices = {};
   
   // أسعار PS4 فردية لكل جهاز (اسم الجهاز -> {فردي، زوجي})
-  Map<String, Map<String, double>> _ps4Prices = {
-    'Arabia 1': {'single': 2000.0, 'multi': 3000.0},
-    'Arabia 2': {'single': 2000.0, 'multi': 3000.0},
-    'Arabia 3': {'single': 3000.0, 'multi': 4000.0},
-    'Arabia 4': {'single': 3000.0, 'multi': 4000.0},
-    'Arabia 5': {'single': 3000.0, 'multi': 4000.0},
-    'Arabia 6': {'single': 2000.0, 'multi': 3000.0},
-    'Arabia 7': {'single': 2000.0, 'multi': 3000.0},
-    'Arabia 8': {'single': 2000.0, 'multi': 3000.0},
+  Map<String, Map<String, double>> _ps4Prices = { 
   };
   
   // الأقسام المخصصة
@@ -245,15 +227,9 @@ class AppState extends ChangeNotifier {
     print('🔄 تم تفعيل نظام الحفظ التلقائي - كل 30 ثانية');
   }
   
-  // 🔄 بدء الحفظ التلقائي الدوري
+  // 🔄 Auto-save disabled in server-only mode
   void _startAutoSave() {
-    _autoSaveTimer?.cancel(); // إلغاء أي timer سابق
-    _autoSaveTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (DateTime.now().difference(_lastSaveTime).inSeconds > 25) {
-        print('🔄 حفظ تلقائي دوري...');
-        _saveToPrefs();
-      }
-    });
+    print('Server-only mode: Auto-save disabled');
   }
   
   // Getters وSetters لأسعار الطلبات
@@ -1176,236 +1152,12 @@ class AppState extends ChangeNotifier {
     _saveToPrefs();
   }
 
-  static Future<Box> _getBox() async {
-    // تجنب المحاولات المتعددة المتزامنة
-    if (_isStaticSaving) {
-      await Future.delayed(const Duration(milliseconds: 100));
-      return _getBox(); // إعادة المحاولة
-    }
-    
-    try {
-      // إذا كان لدينا صندوق مهيأ ومفتوح، استخدمه
-      if (_sharedBox != null && _sharedBox!.isOpen) {
-        print('استخدام الصندوق المفتوح مسبقاً: ${_sharedBox!.name}');
-        return _sharedBox!;
-      }
-      
-      // إغلاق أي صندوق قديم
-      if (_sharedBox != null && _sharedBox!.isOpen) {
-        await _sharedBox!.close();
-        print('تم إغلاق الصندوق القديم');
-      }
-      
-  // فتح Box جديد باسم ثابت لضمان حفظ البيانات بشكل صحيح
-  const boxName = 'safeDevicesBox';
-  print('محاولة فتح $boxName...');
-  _sharedBox = await Hive.openBox(boxName);
-  _isBoxInitialized = true;
-  print('✅ تم فتح $boxName بنجاح في المسار الآمن');
-  return _sharedBox!;
-      
-    } catch (e) {
-      print('Error opening box: $e');
-      
-      // معالجة مشاكل ملفات القفل
-      if (e.toString().contains('PathAccessException') || 
-          e.toString().contains('lock failed') ||
-          e.toString().contains('cannot access the file')) {
-        
-        print('Lock file issue detected in _getBox, waiting...');
-        // انتظار قصير ومحاولة مع Box مختلف
-        await Future.delayed(const Duration(milliseconds: 200));
-        
-        try {
-          // محاولة فتح نفس الصندوق الثابت كحل طارئ
-          const fallbackBoxName = 'safeDevicesBox';
-          print('🚨 محاولة فتح صندوق الطوارئ: $fallbackBoxName');
-          _sharedBox = await Hive.openBox(fallbackBoxName);
-          _isBoxInitialized = true;
-          print('✅ تم فتح صندوق الطوارئ بنجاح: $fallbackBoxName');
-          return _sharedBox!;
-        } catch (fallbackError) {
-          print('Fallback box also failed: $fallbackError');
-          // كحل أخير، استخدام SharedPreferences
-          throw Exception('Hive completely unavailable, falling back to SharedPreferences');
-        }
-      } else {
-        // أخطاء أخرى غير متعلقة بملفات القفل
-        _sharedBox = null;
-        _isBoxInitialized = false;
-        throw e;
-      }
-    }
-  }
+  // Hive removed - server-only mode
 
   Future<void> _saveToPrefs() async {
-    // تجنب الحفظ المتزامن
-    if (_isSaving) return;
-    _isSaving = true;
-    
-    // محاولة الحفظ مع Hive أولاً، وإذا فشل استخدام SharedPreferences
-    bool hiveSaveSuccess = false;
-    
-    // 🚀 نظام الحفظ المحسن - حفظ فوري مع البيانات الأساسية
-    try {
-      final allData = {
-        'devices': _devices.map((key, value) => MapEntry(key, value.toJson())),
-        'pcPrice': _pcPrice,
-        'ps4Prices': _ps4Prices,
-        'pcPrices': _pcPrices,
-        'tablePrices': _tablePrices,
-        'billiardPrices': _billiardPrices,
-        'orderPrices': _orderPrices,
-        'customCategories': _customCategories,
-        'defaultCategoryNames': _defaultCategoryNames,
-        'todayExpenses': _todayExpenses,
-        'manualRevenues': _manualRevenues,
-        'completedMonths': _completedMonths.toList(),
-        'debts': _debts,
-        'deletedDevices': _deletedDevices.toList(),
-        'isDarkMode': _isDarkMode,
-        'lastSaveTime': DateTime.now().toIso8601String(),
-      };
-      
-      // حفظ فوري في نظام الحفظ المحسن
-      await DataPersistenceManager().saveAllData(allData);
-    } catch (e) {
-      print('خطأ في النظام المحسن: $e');
-    }
-    
-    Box? box;
-    try {
-      // استخدام الدالة الآمنة للحصول على Box
-      box = await _getBox();
-      
-      // التأكد من أن Box مفتوح
-      if (!box.isOpen) {
-        print('Warning: Box is not open, trying to reopen...');
-        // إعادة تعيين وإعادة فتح
-        _sharedBox = null;
-        _isBoxInitialized = false;
-        box = await _getBox();
-      }
-      
-  final data = _devices.map((key, value) => MapEntry(key, value.toJson()));
-  await box.put('devicesData', jsonEncode(data));
-  // حفظ الحجوزات بشكل مستقل
-  await box.put('reservationsData', jsonEncode(_allReservations.map((e) => e.toJson()).toList()));
-      
-      // حفظ الأسعار
-      final pricesData = {
-        'pcPrice': _pcPrice,
-        'ps4Prices': _ps4Prices,
-        'pcPrices': _pcPrices,
-        'tablePrices': _tablePrices,
-        'billiardPrices': _billiardPrices,
-      };
-      await box.put('pricesData', jsonEncode(pricesData));
-      
-      // حفظ أسعار الطلبات
-      await box.put('orderPricesData', jsonEncode(_orderPrices));
-    
-      // حفظ الأقسام المخصصة
-      await box.put('customCategoriesData', jsonEncode(_customCategories));
-      
-      // حفظ أسماء الأقسام الافتراضية
-      await box.put('defaultCategoryNamesData', jsonEncode(_defaultCategoryNames));
-      
-      // حفظ المصروفات
-      await box.put('todayExpensesData', jsonEncode(_todayExpenses));
-      
-      // حفظ الإيرادات اليدوية
-      await box.put('manualRevenuesData', jsonEncode(_manualRevenues));
-      
-      // حفظ الأشهر المكتملة
-      await box.put('completedMonthsData', jsonEncode(_completedMonths.toList()));
-      
-      // حفظ بيانات الأشهر المكتملة الكاملة
-      await box.put('monthlyDataMap', jsonEncode(_monthlyData));
-      
-      // حفظ الديون
-      await box.put('debtsData', jsonEncode(_debts));
-      
-      // حفظ قائمة الأجهزة المحذوفة
-      await box.put('deletedDevicesData', jsonEncode(_deletedDevices.toList()));
-      
-      // حفظ إعدادات الثيم
-      await box.put('isDarkMode', _isDarkMode);
-      
-      hiveSaveSuccess = true;
-      _lastSaveTime = DateTime.now(); // تسجيل وقت الحفظ
-      print('✅ حفظ Hive ناجح في ${_lastSaveTime.toString().substring(11, 19)}');
-      
-      // لا نغلق الصندوق هنا لتجنب مشاكل الوصول المتزامن
-    } catch (e) {
-      print('Error saving to Hive: $e');
-      
-      // معالجة أخطاء ملفات القفل
-      if (e.toString().contains('PathAccessException') || 
-          e.toString().contains('cannot access the file') ||
-          e.toString().contains('lock') ||
-          e.toString().contains('Hive completely unavailable')) {
-        print('Hive unavailable, using SharedPreferences backup immediately...');
-        
-        // تخطي محاولة الاسترداد واستخدام SharedPreferences مباشرة
-        hiveSaveSuccess = false;
-        
-        // إعادة تعيين متغيرات Hive
-        try {
-          if (_sharedBox != null && _sharedBox!.isOpen) {
-            await _sharedBox!.close();
-          }
-        } catch (closeError) {
-          print('Error closing box during recovery: $closeError');
-        }
-        
-        _sharedBox = null;
-        _isBoxInitialized = false;
-      } else {
-        // أخطاء أخرى
-        _sharedBox = null;
-        _isBoxInitialized = false;
-      }
-    } finally {
-      // إذا فشل حفظ Hive، استخدام SharedPreferences كبديل
-      if (!hiveSaveSuccess) {
-        try {
-          await _saveToSharedPrefs();
-          print('Fallback to SharedPreferences successful');
-        } catch (e) {
-          print('SharedPreferences fallback also failed: $e');
-        }
-      }
-      _isSaving = false;
-    }
-  }
-
-  // دالة حفظ احتياطية باستخدام SharedPreferences
-  Future<void> _saveToSharedPrefs() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      
-      // حفظ البيانات الأساسية فقط
-      final data = _devices.map((key, value) => MapEntry(key, value.toJson()));
-      await prefs.setString('devicesData_backup', jsonEncode(data));
-      
-      // حفظ الأسعار
-      final pricesData = {
-        'pcPrice': _pcPrice,
-        'ps4Prices': _ps4Prices,
-        'pcPrices': _pcPrices,
-        'tablePrices': _tablePrices,
-        'billiardPrices': _billiardPrices,
-      };
-      await prefs.setString('pricesData_backup', jsonEncode(pricesData));
-      
-      // حفظ إعدادات الثيم
-      await prefs.setBool('isDarkMode_backup', _isDarkMode);
-      
-      print('SharedPreferences backup save completed');
-    } catch (e) {
-      print('Error saving to SharedPreferences: $e');
-    }
+    // No local persistence - server-only mode
+    // Data is managed in memory only
+    print('Server-only mode: No local persistence');
   }
 
   void _saveSelectedMonthToPrefs(String monthId) async {
@@ -1429,295 +1181,20 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _loadFromPrefs() async {
-    // استرجاع الحجوزات المستقلة
-    final boxReservations = await _getBox();
-    final reservationsString = boxReservations.get('reservationsData');
-    if (reservationsString != null) {
-      final List<dynamic> reservationsData = jsonDecode(reservationsString);
-      _allReservations = reservationsData.map((e) => ReservationItem.fromJson(e)).toList();
-    }
-    bool hiveLoadSuccess = false;
-    
-    // 🚀 محاولة تحميل من النظام المحسن أولاً
-    try {
-      final savedData = await DataPersistenceManager().loadAllData();
-      if (savedData != null) {
-        await _loadFromSavedData(savedData);
-        print('✅ تم تحميل البيانات من النظام المحسن بنجاح!');
-        hiveLoadSuccess = true;
-      }
-    } catch (e) {
-      print('تحذير النظام المحسن: $e');
-    }
-    
-    // إذا فشل النظام المحسن، استخدام Hive التقليدي
-    if (!hiveLoadSuccess) {
-      try {
-        // استخدام الدالة الآمنة للحصول على Box
-        final box = await _getBox();
-      final jsonString = box.get('devicesData');
-      if (jsonString != null) {
-        final Map<String, dynamic> jsonData = jsonDecode(jsonString);
-        _devices = jsonData.map((key, value) =>
-            MapEntry(key, DeviceData.fromJson(value as Map<String, dynamic>)));
-
-        for (var entry in _devices.entries) {
-          if (entry.value.isRunning) {
-            startTimer(entry.key);
-          }
-        }
-      }
-    
-    // تحميل الأسعار
-    final pricesString = box.get('pricesData');
-    if (pricesString != null) {
-      final Map<String, dynamic> pricesData = jsonDecode(pricesString);
-      _pcPrice = pricesData['pcPrice']?.toDouble() ?? 1500;
-      
-      // تحميل أسعار PS4 الجديدة أو استخدام القيم الافتراضية
-      if (pricesData['ps4Prices'] != null) {
-        final Map<String, dynamic> savedPs4Prices = Map<String, dynamic>.from(pricesData['ps4Prices']);
-        _ps4Prices.clear();
-        savedPs4Prices.forEach((deviceName, prices) {
-          _ps4Prices[deviceName] = Map<String, double>.from(prices);
-        });
-      }
-      
-      // تحميل أسعار PC الفردية
-      if (pricesData['pcPrices'] != null) {
-        _pcPrices = Map<String, double>.from(pricesData['pcPrices']);
-      }
-      
-      // تحميل أسعار الطاولات الفردية
-      if (pricesData['tablePrices'] != null) {
-        _tablePrices = Map<String, double>.from(pricesData['tablePrices']);
-      }
-      
-      // تحميل أسعار البيليارد الفردية
-      if (pricesData['billiardPrices'] != null) {
-        _billiardPrices = Map<String, double>.from(pricesData['billiardPrices']);
-      }
-    }
-    
-    // تحميل أسعار الطلبات
-    final orderPricesString = box.get('orderPricesData');
-    if (orderPricesString != null) {
-      final Map<String, dynamic> orderPricesData = jsonDecode(orderPricesString);
-      _orderPrices.addAll(orderPricesData.map((key, value) => MapEntry(key, value.toDouble())));
-    }
-    
-    // تحميل الأقسام المخصصة
-    final customCategoriesString = box.get('customCategoriesData');
-    if (customCategoriesString != null) {
-      final Map<String, dynamic> customCategoriesData = jsonDecode(customCategoriesString);
-      _customCategories = customCategoriesData.map((key, value) => 
-        MapEntry(key, List<String>.from(value)));
-    }
-    
-    // تحميل أسماء الأقسام الافتراضية
-    final defaultCategoryNamesString = box.get('defaultCategoryNamesData');
-    if (defaultCategoryNamesString != null) {
-      final Map<String, dynamic> defaultCategoryNamesData = jsonDecode(defaultCategoryNamesString);
-      _defaultCategoryNames.addAll(defaultCategoryNamesData.map((key, value) => MapEntry(key, value.toString())));
-    }
-    
-    // تحميل المصروفات
-    final expensesString = box.get('todayExpensesData');
-    if (expensesString != null) {
-      final List<dynamic> expensesData = jsonDecode(expensesString);
-      _todayExpenses = List<Map<String, dynamic>>.from(expensesData);
-    }
-    
-    // تحميل الإيرادات اليدوية
-    final revenuesString = box.get('manualRevenuesData');
-    if (revenuesString != null) {
-      final List<dynamic> revenuesData = jsonDecode(revenuesString);
-      _manualRevenues = List<Map<String, dynamic>>.from(revenuesData);
-    }
-    
-    // تحميل الأشهر المكتملة
-    final completedMonthsString = box.get('completedMonthsData');
-    if (completedMonthsString != null) {
-      final List<dynamic> completedMonthsData = jsonDecode(completedMonthsString);
-      _completedMonths = Set<String>.from(completedMonthsData);
-    }
-    
-    // تحميل بيانات الأشهر المكتملة
-    final monthlyDataString = box.get('monthlyDataMap');
-    if (monthlyDataString != null) {
-      final Map<String, dynamic> monthlyDataRaw = jsonDecode(monthlyDataString);
-      _monthlyData = monthlyDataRaw.map((key, value) => 
-        MapEntry(key, Map<String, dynamic>.from(value as Map))
-      );
-    }
-    
-    // تحميل الديون
-    final debtsString = box.get('debtsData');
-    if (debtsString != null) {
-      final List<dynamic> debtsData = jsonDecode(debtsString);
-      _debts = List<Map<String, dynamic>>.from(debtsData);
-    }
-    
-      // تحميل قائمة الأجهزة المحذوفة
-      final deletedDevicesString = box.get('deletedDevicesData');
-      if (deletedDevicesString != null) {
-        final List<dynamic> deletedDevicesData = jsonDecode(deletedDevicesString);
-        _deletedDevices = Set<String>.from(deletedDevicesData);
-        print('=== LOADED DELETED DEVICES: $_deletedDevices ===');
-      } else {
-        print('=== NO DELETED DEVICES DATA FOUND - STARTING FRESH ===');
-        _deletedDevices = <String>{};
-      }      // تحميل إعدادات الثيم
-      _isDarkMode = box.get('isDarkMode', defaultValue: true);
-      
-      // لا نغلق الصندوق هنا ليبقى متاحاً للاستخدام
-      
-      // إنشاء الأجهزة الافتراضية إذا لم توجد أي أجهزة
-      _ensureDefaultDevices();
-      
-      hiveLoadSuccess = true;
-      print('Hive load successful');
-      
-      notifyListeners();
-      } catch (e) {
-        // في حالة حدوث خطأ، استخدم القيم الافتراضية
-        print('Error loading from Hive: $e');
-        hiveLoadSuccess = false;
-      }
-    }
-
-    // إذا فشل تحميل Hive، حاول من SharedPreferences
-    if (!hiveLoadSuccess) {
-      try {
-        await _loadFromSharedPrefs();
-        print('Fallback load from SharedPreferences successful');
-      } catch (e) {
-        print('SharedPreferences fallback load also failed: $e');
-        // إنشاء الأجهزة الافتراضية كحل أخير
-        _ensureDefaultDevices();
-      }
-      
-      notifyListeners();
-    }
+    // Server-only mode: No local loading from Hive
+    // Data is loaded fresh from server on each app start
+    print('Server-only mode: Skipping local data loading from Hive');
+    _ensureDefaultDevices();
+    notifyListeners();
   }
 
   // دالة تحميل احتياطية من SharedPreferences
-  Future<void> _loadFromSharedPrefs() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      
-      // تحميل البيانات الأساسية
-      final jsonString = prefs.getString('devicesData_backup');
-      if (jsonString != null) {
-        final Map<String, dynamic> jsonData = jsonDecode(jsonString);
-        _devices = jsonData.map((key, value) =>
-            MapEntry(key, DeviceData.fromJson(value as Map<String, dynamic>)));
-
-        for (var entry in _devices.entries) {
-          if (entry.value.isRunning) {
-            startTimer(entry.key);
-          }
-        }
-      }
-      
-      // تحميل الأسعار
-      final pricesString = prefs.getString('pricesData_backup');
-      if (pricesString != null) {
-        final Map<String, dynamic> pricesData = jsonDecode(pricesString);
-        _pcPrice = pricesData['pcPrice'] ?? 1500.0;
-        
-        if (pricesData['ps4Prices'] != null) {
-          _ps4Prices = Map<String, Map<String, double>>.from(
-            (pricesData['ps4Prices'] as Map).map((key, value) => 
-              MapEntry(key, Map<String, double>.from(value))
-            )
-          );
-        }
-        
-        if (pricesData['pcPrices'] != null) {
-          _pcPrices = Map<String, double>.from(pricesData['pcPrices']);
-        }
-        
-        if (pricesData['tablePrices'] != null) {
-          _tablePrices = Map<String, double>.from(pricesData['tablePrices']);
-        }
-        
-        if (pricesData['billiardPrices'] != null) {
-          _billiardPrices = Map<String, double>.from(pricesData['billiardPrices']);
-        }
-      }
-      
-      // تحميل إعدادات الثيم
-      _isDarkMode = prefs.getBool('isDarkMode_backup') ?? true;
-      
-      // إنشاء الأجهزة الافتراضية إذا لم توجد أي أجهزة
-      _ensureDefaultDevices();
-      
-      print('SharedPreferences backup load completed');
-    } catch (e) {
-      print('Error loading from SharedPreferences: $e');
-      throw e;
-    }
-  }
+  // _loadFromSharedPrefs removed - server-only mode
   
   void _ensureDefaultDevices() {
-    print('=== _ensureDefaultDevices called ===');
-    print('Current deleted devices at start: $_deletedDevices');
-    print('Current devices count: ${_devices.length}');
-    
-    // إنشاء الأجهزة الافتراضية إذا لم توجد (وتجنب المحذوفة)
-    bool shouldSave = false;
-    
-    // إنشاء أجهزة PC
-    for (int i = 1; i <= 16; i++) {
-      final deviceName = 'Pc $i';
-      if (!_devices.containsKey(deviceName) && !_deletedDevices.contains(deviceName)) {
-        print('Creating PC: $deviceName');
-        _devices[deviceName] = DeviceData(name: deviceName);
-        shouldSave = true;
-      } else if (_deletedDevices.contains(deviceName)) {
-        print('Skipping deleted PC: $deviceName');
-      }
-    }
-    
-    // إنشاء أجهزة PS4
-    for (int i = 1; i <= 8; i++) {
-      final deviceName = 'Arabia $i';
-      if (!_devices.containsKey(deviceName) && !_deletedDevices.contains(deviceName)) {
-        print('Creating PS4: $deviceName');
-        _devices[deviceName] = DeviceData(name: deviceName);
-        // إضافة أسعار افتراضية للPS4
-        _ps4Prices[deviceName] = {'single': 2000.0, 'multi': 3000.0};
-        shouldSave = true;
-      } else if (_deletedDevices.contains(deviceName)) {
-        print('Skipping deleted PS4: $deviceName');
-      }
-    }
-    
-    // إنشاء طاولات
-    for (int i = 1; i <= 6; i++) {
-      final deviceName = 'Table $i';
-      if (!_devices.containsKey(deviceName) && !_deletedDevices.contains(deviceName)) {
-        print('Creating default table: $deviceName');
-        _devices[deviceName] = DeviceData(name: deviceName);
-        shouldSave = true;
-      } else if (_deletedDevices.contains(deviceName)) {
-        print('Skipping deleted table: $deviceName');
-      } else if (_devices.containsKey(deviceName)) {
-        print('Table already exists: $deviceName');
-      }
-    }
-    
-    print('Devices after creation: ${_devices.keys.toList()}');
-    print('Should save: $shouldSave');
-    
-    // حفظ الأجهزة الجديدة إذا تم إضافة أي منها
-    if (shouldSave) {
-      print('Saving new devices...');
-      _saveToPrefs();
-    }
-    
-    print('=== _ensureDefaultDevices finished ===');
+    // Server-only mode: Don't create default devices
+    // Trust server completely - if server is empty, app should be empty
+    print('Server-only mode: Skipping default device creation');
   }
 
   double calculatePrice(String deviceName, Duration elapsed, String mode) {
@@ -1743,134 +1220,8 @@ class AppState extends ChangeNotifier {
     double price = (elapsed.inSeconds / 3600.0) * ratePerHour;
     return price;
   }
-  
-  static Future<void> safeCloseBox() async {
-    try {
-      if (_sharedBox != null && _sharedBox!.isOpen) {
-        await _sharedBox!.close();
-        _sharedBox = null;
-        _isBoxInitialized = false;
-      }
-    } catch (e) {
-      print('Error safely closing box: $e');
-    }
-  }
 
-  // دالة تحميل البيانات من النظام المحسن
-  Future<void> _loadFromSavedData(Map<String, dynamic> data) async {
-    try {
-      // تحميل الأجهزة
-      if (data['devices'] != null) {
-        final devicesData = Map<String, dynamic>.from(data['devices']);
-        _devices = devicesData.map((key, value) =>
-            MapEntry(key, DeviceData.fromJson(Map<String, dynamic>.from(value))));
-        
-        // إعادة تشغيل المؤقتات للأجهزة العاملة
-        for (var entry in _devices.entries) {
-          if (entry.value.isRunning) {
-            startTimer(entry.key);
-          }
-        }
-      }
-      
-      // تحميل الأسعار
-      _pcPrice = (data['pcPrice'] ?? 1500.0).toDouble();
-      
-      if (data['ps4Prices'] != null) {
-        _ps4Prices.clear();
-        final ps4Data = Map<String, dynamic>.from(data['ps4Prices']);
-        ps4Data.forEach((deviceName, prices) {
-          _ps4Prices[deviceName] = Map<String, double>.from(prices);
-        });
-      }
-      
-      if (data['pcPrices'] != null) {
-        _pcPrices = Map<String, double>.from(data['pcPrices']);
-      }
-      
-      if (data['tablePrices'] != null) {
-        _tablePrices = Map<String, double>.from(data['tablePrices']);
-      }
-      
-      if (data['billiardPrices'] != null) {
-        _billiardPrices = Map<String, double>.from(data['billiardPrices']);
-      }
-      
-      if (data['orderPrices'] != null) {
-        _orderPrices = Map<String, double>.from(data['orderPrices']);
-      }
-      
-      // تحميل الأقسام المخصصة
-      if (data['customCategories'] != null) {
-        final categoriesData = Map<String, dynamic>.from(data['customCategories']);
-        _customCategories = categoriesData.map((key, value) => 
-            MapEntry(key, List<String>.from(value)));
-      }
-      
-      // تحميل أسماء الأقسام الافتراضية
-      if (data['defaultCategoryNames'] != null) {
-        _defaultCategoryNames = Map<String, String>.from(data['defaultCategoryNames']);
-      }
-      
-      // تحميل المصروفات
-      if (data['todayExpenses'] != null) {
-        _todayExpenses = List<Map<String, dynamic>>.from(data['todayExpenses']);
-      }
-      
-      // تحميل الإيرادات اليدوية
-      if (data['manualRevenues'] != null) {
-        _manualRevenues = List<Map<String, dynamic>>.from(data['manualRevenues']);
-      }
-      
-      // تحميل الأشهر المكتملة
-      if (data['completedMonths'] != null) {
-        _completedMonths = Set<String>.from(data['completedMonths']);
-      }
-      
-      // تحميل الديون
-      if (data['debts'] != null) {
-        _debts = List<Map<String, dynamic>>.from(data['debts']);
-      }
-      
-      // تحميل الأجهزة المحذوفة
-      if (data['deletedDevices'] != null) {
-        _deletedDevices = Set<String>.from(data['deletedDevices']);
-        print('✅ تم تحميل الأجهزة المحذوفة: $_deletedDevices');
-      }
-      
-      // تحميل المصروفات
-      if (data['todayExpenses'] != null) {
-        _todayExpenses = List<Map<String, dynamic>>.from(data['todayExpenses']);
-        print('✅ تم تحميل المصروفات: ${_todayExpenses.length} مصروف');
-      }
-      
-      // تحميل الإيرادات اليدوية
-      if (data['manualRevenues'] != null) {
-        _manualRevenues = List<Map<String, dynamic>>.from(data['manualRevenues']);
-        print('✅ تم تحميل الإيرادات: ${_manualRevenues.length} إيراد');
-      }
-      
-      // تحميل الأشهر المكتملة
-      if (data['completedMonths'] != null) {
-        _completedMonths = Set<String>.from(data['completedMonths']);
-        print('✅ تم تحميل الأشهر المكتملة: ${_completedMonths.length} شهر');
-      }
-      
-      // تحميل الديون
-      if (data['debts'] != null) {
-        _debts = List<Map<String, dynamic>>.from(data['debts']);
-        print('✅ تم تحميل الديون: ${_debts.length} دين');
-      }
-      
-      // تحميل إعدادات الثيم
-      _isDarkMode = data['isDarkMode'] ?? true;
-      
-      print('✅ تم تحميل جميع البيانات من النظام المحسن');
-    } catch (e) {
-      print('❌ خطأ في تحميل البيانات: $e');
-      throw e;
-    }
-  }
+  // safeCloseBox removed - server-only mode
 
   @override
   void dispose() {
@@ -1882,62 +1233,140 @@ class AppState extends ChangeNotifier {
     _timers.values.forEach((timer) => timer?.cancel());
     _timers.clear();
     
-    // إغلاق صناديق Hive إذا كانت مفتوحة
-    safeCloseBox();
-    
     super.dispose();
   }
 
-  // 🚨 حفظ طارئ شامل وآمن - يحفظ كل شيء!
+  // 🚨 Emergency save - no-op in server-only mode
   void _emergencySave() {
+    print('Server-only mode: Emergency save not needed');
+  }
+
+  // ============= API Sync Methods =============
+  // These methods allow AppState to be updated from API responses
+
+  /// Update device from API response
+  void updateDeviceFromApi(String deviceId, Map<String, dynamic> data) {
     try {
-      print('🔥 بدء الحفظ الطارئ الشامل - جميع البيانات!');
-      
-      // ✅ جمع جميع البيانات الحرجة بدون استثناء
-      final allData = {
-        // 🏢 بيانات الأجهزة والطاولات
-        'devices': _devices.map((key, value) => MapEntry(key, value.toJson())),
-        'deletedDevices': _deletedDevices.toList(),
-        
-        // 💰 جميع أنواع الأسعار
-        'pcPrice': _pcPrice,
-        'ps4Prices': _ps4Prices,
-        'pcPrices': _pcPrices,
-        'tablePrices': _tablePrices,
-        'billiardPrices': _billiardPrices,
-        'orderPrices': _orderPrices,
-        
-        // 📂 الأقسام والفئات المخصصة
-        'customCategories': _customCategories,
-        'defaultCategoryNames': _defaultCategoryNames,
-        
-        // 💸 المصروفات والإيرادات
-        'todayExpenses': _todayExpenses,
-        'manualRevenues': _manualRevenues,
-        
-        // 📅 البيانات التاريخية
-        'completedMonths': _completedMonths.toList(),
-        'debts': _debts,
-        
-        // ⚙️ الإعدادات
-        'isDarkMode': _isDarkMode,
-        
-        // 🕐 معلومات الحفظ
-        'emergencySave': true,
-        'saveTime': DateTime.now().toIso8601String(),
-        'dataIntegrity': 'complete_backup',
-      };
-      
-      DataPersistenceManager().saveAllData(allData).timeout(const Duration(seconds: 3));
-      print('✅ تم الحفظ الطارئ المحسن بنجاح');
+      final device = DeviceData.fromJson(data);
+      _devices[deviceId] = device;
+      notifyListeners();
+      print('✅ Updated device $deviceId from API');
     } catch (e) {
-      // إذا فشل، استخدم الطريقة القديمة
-      try {
-        _saveToSharedPrefs().timeout(const Duration(seconds: 2));
-        print('✅ تم الحفظ الطارئ التقليدي بنجاح');
-      } catch (e2) {
-        print('⚠️ تحذير: فشل جميع أنظمة الحفظ الطارئ: $e2');
+      print('❌ Error updating device from API: $e');
+    }
+  }
+
+  /// Update device orders from API response
+  void updateDeviceOrdersFromApi(String deviceId, List<dynamic> ordersData) {
+    try {
+      if (_devices.containsKey(deviceId)) {
+        final orders = ordersData
+            .whereType<Map<String, dynamic>>()
+            .map((e) => OrderItem.fromJson(e))
+            .toList();
+        _devices[deviceId]!.orders = orders;
+        notifyListeners();
+        print('✅ Updated orders for $deviceId from API');
       }
+    } catch (e) {
+      print('❌ Error updating orders from API: $e');
+    }
+  }
+
+  /// Update reservations from API response
+  void updateReservationsFromApi(List<dynamic> reservationsData) {
+    try {
+      _allReservations = reservationsData
+          .whereType<Map<String, dynamic>>()
+          .map((e) => ReservationItem.fromJson(e))
+          .toList();
+      notifyListeners();
+      print('✅ Updated reservations from API');
+    } catch (e) {
+      print('❌ Error updating reservations from API: $e');
+    }
+  }
+
+  /// Update prices from API response
+  void updatePricesFromApi(Map<String, dynamic> pricesData) {
+    try {
+      _pcPrice = (pricesData['pcPrice'] ?? 1500).toDouble();
+      
+      if (pricesData['ps4Prices'] != null) {
+        _ps4Prices.clear();
+        final Map<String, dynamic> savedPs4Prices = Map<String, dynamic>.from(pricesData['ps4Prices']);
+        savedPs4Prices.forEach((deviceName, prices) {
+          _ps4Prices[deviceName] = Map<String, double>.from(prices);
+        });
+      }
+      
+      if (pricesData['pcPrices'] != null) {
+        _pcPrices = Map<String, double>.from(pricesData['pcPrices']);
+      }
+      
+      if (pricesData['tablePrices'] != null) {
+        _tablePrices = Map<String, double>.from(pricesData['tablePrices']);
+      }
+      
+      if (pricesData['billiardPrices'] != null) {
+        _billiardPrices = Map<String, double>.from(pricesData['billiardPrices']);
+      }
+      
+      notifyListeners();
+      print('✅ Updated prices from API');
+    } catch (e) {
+      print('❌ Error updating prices from API: $e');
+    }
+  }
+
+  /// Update categories from API response
+  void updateCategoriesFromApi(List<dynamic> categoriesData) {
+    try {
+      _customCategories.clear();
+      for (var catData in categoriesData.whereType<Map<String, dynamic>>()) {
+        final categoryName = catData['name'] as String?;
+        if (categoryName != null) {
+          // Extract item names as List<String>
+          final items = (catData['items'] as List?)
+              ?.whereType<String>()
+              .toList() ?? [];
+          _customCategories[categoryName] = items;
+        }
+      }
+      notifyListeners();
+      print('✅ Updated categories from API');
+    } catch (e) {
+      print('❌ Error updating categories from API: $e');
+    }
+  }
+
+  /// Update debts from API response
+  void updateDebtsFromApi(Map<String, dynamic> debtsData) {
+    try {
+      _debts = [];
+      (debtsData['debts'] as List?)?.forEach((debtData) {
+        if (debtData is Map<String, dynamic>) {
+          _debts.add(debtData);
+        }
+      });
+      notifyListeners();
+      print('✅ Updated debts from API');
+    } catch (e) {
+      print('❌ Error updating debts from API: $e');
+    }
+  }
+
+  /// Update expenses from API response
+  void updateExpensesFromApi(List<dynamic> expensesData) {
+    try {
+      _todayExpenses = [];
+      for (var expenseData in expensesData.whereType<Map<String, dynamic>>()) {
+        _todayExpenses.add(expenseData);
+      }
+      notifyListeners();
+      print('✅ Updated expenses from API');
+    } catch (e) {
+      print('❌ Error updating expenses from API: $e');
     }
   }
 }

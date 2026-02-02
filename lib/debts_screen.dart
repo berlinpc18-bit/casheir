@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'app_state.dart';
+import 'api_sync_manager.dart';
 
 class DebtsScreen extends StatefulWidget {
   const DebtsScreen({super.key});
@@ -22,6 +23,33 @@ class _DebtsScreenState extends State<DebtsScreen> {
     _amountController = TextEditingController();
     _editNameController = TextEditingController();
     _editAmountController = TextEditingController();
+    
+    // Sync debts from API
+    _syncDebtsFromApi();
+  }
+
+  Future<void> _syncDebtsFromApi() async {
+    try {
+      final appState = Provider.of<AppState>(context, listen: false);
+      final apiSync = ApiSyncManager();
+      await apiSync.syncDebts(appState);
+    } catch (e) {
+      print('Error syncing debts: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('⚠️ خطأ في تحميل البيانات من الخادم - استخدام البيانات المحلية'),
+            backgroundColor: Colors.red.withOpacity(0.7),
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'إعادة محاولة',
+              onPressed: _syncDebtsFromApi,
+              textColor: Colors.amber,
+            ),
+          ),
+        );
+      }
+    }
   }
 
   @override

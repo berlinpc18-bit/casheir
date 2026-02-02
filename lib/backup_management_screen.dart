@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'data_persistence_manager.dart';
 
 class BackupManagementScreen extends StatefulWidget {
   @override
@@ -7,7 +6,6 @@ class BackupManagementScreen extends StatefulWidget {
 }
 
 class _BackupManagementScreenState extends State<BackupManagementScreen> {
-  final DataPersistenceManager _manager = DataPersistenceManager();
   Map<String, dynamic> _backupInfo = {};
   bool _isLoading = true;
 
@@ -20,52 +18,25 @@ class _BackupManagementScreenState extends State<BackupManagementScreen> {
   Future<void> _loadBackupInfo() async {
     setState(() => _isLoading = true);
     
-    final info = await _manager.getBackupFilesInfo();
+    // Server-only mode: No local backup info needed
     setState(() {
-      _backupInfo = info;
+      _backupInfo = {'message': 'Server-only mode: No local backups'};
       _isLoading = false;
     });
   }
 
   Future<void> _cleanupOldBackups(int keepCount) async {
-    await _manager.cleanupOldBackups(keepCount: keepCount);
+    // Server-only mode: No local backups to cleanup
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('✅ تم تنظيف الملفات القديمة')),
+      SnackBar(content: Text('✅ Server-only mode: No local backups')),
     );
-    await _loadBackupInfo();
   }
 
   Future<void> _deleteAllBackups() async {
-    // تأكيد من المستخدم
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('⚠️ تحذير'),
-        content: Text('هل أنت متأكد من حذف جميع ملفات النسخ الاحتياطية الطارئة؟\nلا يمكن التراجع عن هذا الإجراء!'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('إلغاء'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: Text('حذف الكل', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
+    // Server-only mode: No local backups to delete
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('✅ Server-only mode: No local backups')),
     );
-
-    if (confirm == true) {
-      await _manager.deleteAllEmergencyBackups();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('🗑️ تم حذف جميع الملفات الاحتياطية'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      await _loadBackupInfo();
-    }
   }
 
   @override

@@ -351,26 +351,14 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
     switch (widget.deviceType) {
       case DeviceType.Pc:
         devices = appState.getDevicesByType('PC');
-        // إضافة أجهزة افتراضية إذا لم توجد أجهزة مخصصة
-        if (devices.isEmpty) {
-          devices = List.generate(16, (index) => 'Pc ${index + 1}');
-        }
         categoryTitle = 'Gaming PCs';
         break;
       case DeviceType.Arabia:
         devices = appState.getDevicesByType('PS4');
-        // إضافة أجهزة افتراضية إذا لم توجد أجهزة مخصصة
-        if (devices.isEmpty) {
-          devices = List.generate(8, (index) => 'Arabia ${index + 1}');
-        }
         categoryTitle = 'PlayStation Arena';
         break;
       case DeviceType.Table:
         devices = appState.getDevicesByType('Table');
-        // إضافة أجهزة افتراضية إذا لم توجد أجهزة مخصصة
-        if (devices.isEmpty) {
-          devices = List.generate(6, (index) => 'Table ${index + 1}');
-        }
         categoryTitle = 'Gaming Tables';
         break;
       case DeviceType.Billiard:

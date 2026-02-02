@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
-import 'package:hive/hive.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
@@ -21,8 +19,9 @@ import 'sound_service.dart';
 import 'license_manager.dart';
 import 'license_activation_screen.dart';
 import 'license_wrapper.dart';
-import 'data_persistence_manager.dart';
 import 'printer_service.dart';
+import 'api_client.dart';
+import 'api_sync_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,131 +45,8 @@ void main() async {
     await windowManager.focus();
   });
   
-  // تهيئة Hive في مجلد التطبيق لتجنب مشاكل الصلاحيات
-  final appDir = Directory.current.path;
-  final hiveDir = Directory('$appDir/data');
-  if (!await hiveDir.exists()) {
-    await hiveDir.create(recursive: true);
-  }
-  
-  // حل آمن: استخدام Process ID لضمان عدم تداخل instances
-  final processId = pid; // Process ID فريد لكل تشغيل
-  final safeDir = Directory('$appDir/safe_data_$processId');
-  
-  // تنظيف مجلدات البيانات القديمة (بعد النسخ)
-  // ملاحظة: سيتم التنظيف لاحقاً بعد نسخ البيانات
-
-  // إنشاء مجلد البيانات الآمن
-  if (!await safeDir.exists()) {
-    await safeDir.create(recursive: true);
-  }
-
-  // نسخ البيانات من آخر مجلد safe_data موجود
-  try {
-    Directory? latestDataDir;
-    DateTime? latestTime;
-    
-    // البحث عن آخر مجلد safe_data
-    final parentDir = Directory('$appDir');
-    final dataDirs = parentDir.listSync()
-        .where((entity) => entity is Directory && entity.path.contains('safe_data_'))
-        .cast<Directory>();
-    
-    for (var dir in dataDirs) {
-      try {
-        final stat = await dir.stat();
-        if (latestTime == null || stat.modified.isAfter(latestTime)) {
-          latestTime = stat.modified;
-          latestDataDir = dir;
-        }
-      } catch (e) {
-        print('تحذير عند فحص المجلد: $e');
-      }
-    }
-    
-    // إذا لم يجد مجلد safe_data، ابحث في مجلد data العادي
-    if (latestDataDir == null && await hiveDir.exists()) {
-      latestDataDir = hiveDir;
-    }
-    
-    // نسخ البيانات من آخر مصدر
-    if (latestDataDir != null && latestDataDir.path != safeDir.path) {
-      print('نسخ البيانات من: ${latestDataDir.path}');
-      final files = latestDataDir.listSync()
-          .where((file) => file is File && !file.path.endsWith('.lock'))
-          .cast<File>();
-      
-      for (var file in files) {
-        try {
-          final fileName = file.path.split(Platform.pathSeparator).last;
-          final newPath = '${safeDir.path}${Platform.pathSeparator}$fileName';
-          await file.copy(newPath);
-          print('تم نسخ الملف: $fileName');
-        } catch (e) {
-          print('تحذير عند نسخ الملف: $e');
-        }
-      }
-    }
-  } catch (e) {
-    print('تحذير عند نسخ البيانات: $e');
-  }
-  
-  // إغلاق جميع صناديق Hive المفتوحة من الجلسات السابقة
-  try {
-    await Hive.close();
-    print('تم إغلاق جميع صناديق Hive المفتوحة');
-  } catch (e) {
-    print('تحذير عند إغلاق Hive: $e');
-  }
-
-  // استخدام المجلد الآمن مع Process ID
-  Hive.init(safeDir.path);
-  print('🔒 تم تهيئة Hive في المجلد الآمن: ${safeDir.path}');
-  print('🆔 Process ID الحالي: $processId');
-  print('📁 المجلد الجديد منفصل تماماً عن المجلد القديم!');
-  
-  // التأكد من أن المجلد يعمل
-  final testFile = File('${safeDir.path}/test_init.txt');
-  await testFile.writeAsString('Hive initialized at ${DateTime.now()}');
-  print('✅ تم التحقق من عمل المجلد الآمن');
-  
-  // الآن تنظيف المجلدات القديمة بعد نسخ البيانات بنجاح
-  try {
-    final parentDir = Directory('$appDir');
-    final oldDirs = parentDir.listSync()
-        .where((entity) => entity is Directory && entity.path.contains('safe_data_'))
-        .cast<Directory>();
-    
-    for (var oldDir in oldDirs) {
-      try {
-        final dirName = oldDir.path.split(Platform.pathSeparator).last;
-        if (dirName.startsWith('safe_data_') && oldDir.path != safeDir.path) {
-          final pidStr = dirName.substring(10);
-          final oldPid = int.tryParse(pidStr);
-          if (oldPid != null && oldPid != processId) {
-            // التحقق من أن العملية غير موجودة قبل الحذف
-            try {
-              if (Platform.isWindows) {
-                final result = await Process.run('tasklist', ['/FI', 'PID eq $oldPid']);
-                if (!result.stdout.toString().contains(oldPid.toString())) {
-                  await oldDir.delete(recursive: true);
-                  print('تم حذف مجلد من process منتهي: ${oldDir.path}');
-                }
-              }
-            } catch (e) {
-              // إذا فشل التحقق، احذف المجلد (العملية غير موجودة)
-              await oldDir.delete(recursive: true);
-              print('تم حذف مجلد قديم: ${oldDir.path}');
-            }
-          }
-        }
-      } catch (e) {
-        print('تحذير عند حذف مجلد قديم: $e');
-      }
-    }
-  } catch (e) {
-    print('تحذير عند تنظيف المجلدات القديمة: $e');
-  }
+  // Server-only mode - no local data persistence needed
+  // All data comes from server only
   
   await initializeDateFormatting('ar');
 
@@ -207,17 +83,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     super.didChangeAppLifecycleState(state);
     
     if (state == AppLifecycleState.detached || state == AppLifecycleState.paused) {
-      // إغلاق Hive بأمان عند إغلاق التطبيق
-      _closeHiveSafely();
-    }
-  }
-
-  Future<void> _closeHiveSafely() async {
-    try {
-      await Hive.close();
-      print('تم إغلاق Hive بنجاح');
-    } catch (e) {
-      print('خطأ عند إغلاق Hive: $e');
+      // No cleanup needed - server-only mode
     }
   }
   
@@ -316,6 +182,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   int _currentIndex = 0;
   bool _isFullScreen = false;
   bool _isTogglingFullScreen = false;
+  bool _isSyncing = false;
   final FocusNode _focusNode = FocusNode();
 
   @override
@@ -325,12 +192,212 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _tabController.addListener(() {
       setState(() {
         _currentIndex = _tabController.index;
+        // 🔄 Refresh data from server when tab changes
+        _syncDataFromApi();
       });
     });
     
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusNode.requestFocus();
     });
+    
+    // 🚀 Sync all data from API on app startup
+    _syncDataFromApi();
+  }
+
+  Future<void> _syncDataFromApi() async {
+    if (_isSyncing) return; // Prevent multiple simultaneous syncs
+    
+    setState(() => _isSyncing = true);
+    
+    try {
+      final appState = Provider.of<AppState>(context, listen: false);
+      final apiSync = ApiSyncManager();
+      
+      // Check if server is available
+      final isAvailable = await apiSync.isServerAvailable();
+      if (isAvailable) {
+        print('✅ API Server is available, syncing all data...');
+        await apiSync.syncAll(appState);
+        print('✅ Full API sync completed successfully');
+        
+        // Show success message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 12),
+                  Text('بيانات محدثة من السيرفر'),
+                ],
+              ),
+              backgroundColor: Colors.green.withOpacity(0.8),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        print('⚠️ API Server not available');
+        if (mounted) {
+          _showServerErrorDialog();
+        }
+      }
+    } catch (e) {
+      print('⚠️ Error syncing data from API: $e');
+      if (mounted) {
+        _showServerErrorDialog();
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSyncing = false);
+      }
+    }
+  }
+
+  void _showServerErrorDialog() {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1F1F23),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: Colors.red.withOpacity(0.3)),
+        ),
+        icon: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.red.withOpacity(0.1),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.warning_rounded,
+            color: Colors.red,
+            size: 32,
+          ),
+        ),
+        title: const Text(
+          'مشكلة في الاتصال بالخادم',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.info_rounded, color: Colors.orange, size: 18),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'لم يتم الاتصال بخادم API',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'الخادم: http://localhost:8080',
+                    style: TextStyle(
+                      color: Colors.white60,
+                      fontSize: 12,
+                      fontFamily: 'Courier',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'سيتم استخدام البيانات المحفوظة محليًا',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '✓ حلول ممكنة:',
+                    style: TextStyle(
+                      color: Colors.blue,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  SizedBox(height: 6),
+                  Text(
+                    '1. تأكد من تشغيل خادم API على المنفذ 8080',
+                    style: TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    '2. تحقق من اتصال الشبكة',
+                    style: TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    '3. تأكد من عنوان الخادم الصحيح',
+                    style: TextStyle(color: Colors.white70, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.close_rounded, color: Colors.white70),
+            label: const Text(
+              'متابعة (بيانات محلية)',
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _syncDataFromApi(); // Retry
+            },
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('إعادة محاولة'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.amber,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _toggleFullScreen() {
@@ -490,6 +557,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 return;
               }
               
+              // F5 لتحديث البيانات من السيرفر
+              if (event.logicalKey == LogicalKeyboardKey.f5) {
+                print('F5 detected - Refreshing data from server');
+                _syncDataFromApi();
+                return;
+              }
+              
               // باقي الاختصارات تعمل فقط عندما لا يوجد TextField نشط
               final FocusNode? currentFocus = FocusManager.instance.primaryFocus;
               if (currentFocus != null && currentFocus.context != null) {
@@ -557,15 +631,22 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 _buildModernTabBar(),
                 // Content
                 Expanded(
-                  child: IndexedStack(
-                    index: _currentIndex,
-                    children: const [
-                      DeviceGrid(deviceType: DeviceType.Pc),
-                      DeviceGrid(deviceType: DeviceType.Arabia),
-                      DeviceGrid(deviceType: DeviceType.Table),
-                      DeviceGrid(deviceType: DeviceType.Billiard),
-                      DirectSaleTab(),
-                    ],
+                  child: RefreshIndicator(
+                    onRefresh: _syncDataFromApi,
+                    color: const Color(0xFF6366F1),
+                    backgroundColor: Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xFF1A1A2E)
+                        : const Color(0xFFF8F9FA),
+                    child: IndexedStack(
+                      index: _currentIndex,
+                      children: const [
+                        DeviceGrid(deviceType: DeviceType.Pc),
+                        DeviceGrid(deviceType: DeviceType.Arabia),
+                        DeviceGrid(deviceType: DeviceType.Table),
+                        DeviceGrid(deviceType: DeviceType.Billiard),
+                        DirectSaleTab(),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -1462,39 +1543,13 @@ class _ReservationTabState extends State<ReservationTab> with TickerProviderStat
   }
 
   Future<void> _loadReservations() async {
-    try {
-      Box box;
-      if (Hive.isBoxOpen('reservationsBox')) {
-        box = Hive.box('reservationsBox');
-      } else {
-        box = await Hive.openBox('reservationsBox');
-      }
-      final data = box.get('reservations');
-      if (data != null) {
-        final List decoded = jsonDecode(data);
-        setState(() {
-          reservations = decoded.map((e) => Reservation.fromJson(e)).toList()
-            ..sort((a, b) => a.time.compareTo(b.time));
-        });
-      }
-    } catch (e) {
-      print('Error loading reservations from Hive: $e');
-    }
+    // Server-only mode: reservations load from API on demand
+    print('Loading reservations from server...');
   }
 
   Future<void> _saveReservations() async {
-    try {
-      Box box;
-      if (Hive.isBoxOpen('reservationsBox')) {
-        box = Hive.box('reservationsBox');
-      } else {
-        box = await Hive.openBox('reservationsBox');
-      }
-      final data = jsonEncode(reservations.map((e) => e.toJson()).toList());
-      await box.put('reservations', data);
-    } catch (e) {
-      print('Error saving reservations to Hive: $e');
-    }
+    // Server-only mode: no local persistence needed
+    print('Reservations managed by server only');
   }
 
   void _addReservation() async {
