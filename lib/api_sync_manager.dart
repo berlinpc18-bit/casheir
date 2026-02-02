@@ -40,11 +40,23 @@ class ApiSyncManager {
       
       // Response is already unwrapped by API client
       if (response is Map && response.isNotEmpty) {
-        response.forEach((key, value) {
-          if (value is Map<String, dynamic>) {
-            appState.updateDeviceFromApi(key, value);
+        for (var entry in response.entries) {
+          final deviceId = entry.key;
+          final deviceData = entry.value;
+          
+          if (deviceData is Map<String, dynamic>) {
+            appState.updateDeviceFromApi(deviceId, deviceData);
+            
+            // Also fetch orders for this device
+            try {
+              final orders = await _apiClient.getDeviceOrders(deviceId);
+              appState.updateDeviceOrdersFromApi(deviceId, orders);
+              print('  ✅ Synced orders for $deviceId');
+            } catch (e) {
+              print('  ⚠️ Could not sync orders for $deviceId: $e');
+            }
           }
-        });
+        }
         print('✅ Synced ${response.length} devices from SERVER');
       } else {
         print('⚠️ SERVER has no devices');
@@ -201,6 +213,64 @@ class ApiSyncManager {
     }
   }
   
+  /// Update device status on server
+  Future<void> updateDeviceStatus(
+    String deviceId, {
+    required bool isRunning,
+    required int elapsedSeconds,
+    required String mode,
+    required int customerCount,
+    String? notes,
+  }) async {
+    if (!_useApi) return;
+    
+    try {
+      await _apiClient.updateDeviceStatus(
+        deviceId: deviceId,
+        isRunning: isRunning,
+        elapsedSeconds: elapsedSeconds,
+        mode: mode,
+        customerCount: customerCount,
+        notes: notes,
+      );
+      // print('✅ Device updated on server: $deviceId'); // Commented to reduce noise
+    } catch (e) {
+      print('❌ Error updating device on server: $e');
+      // Don't rethrow to avoid breaking UI for offline usage
+    }
+  }
+
+  /// Sync device orders to server (Full Sync)
+  Future<void> syncOrdersToApi(String deviceId, List<Map<String, dynamic>> orders) async {
+    if (!_useApi) return;
+    
+    try {
+      await _apiClient.syncDeviceOrders(
+        deviceId: deviceId,
+        orders: orders,
+      );
+      print('✅ Orders synced to server for: $deviceId');
+    } catch (e) {
+      print('❌ Error syncing orders to server: $e');
+    }
+  }
+
+  /// Transfer device data from one device to another on server
+  Future<void> transferDeviceViaApi(String fromDeviceId, String toDeviceId) async {
+    if (!_useApi) return;
+    
+    try {
+      final result = await _apiClient.transferDevice(
+        fromDeviceId: fromDeviceId,
+        toDeviceId: toDeviceId,
+      );
+      print('✅ Device transferred on server: ${result['message']}');
+    } catch (e) {
+      print('❌ Error transferring device on server: $e');
+      rethrow; // Rethrow to let caller handle the error
+    }
+  }
+
   /// Check if API server is available
   Future<bool> isServerAvailable() async {
     return await _apiClient.isServerAvailable();

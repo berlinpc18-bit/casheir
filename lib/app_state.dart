@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'printer_service.dart';
+import 'api_sync_manager.dart'; // Add import
 
 class OrderItem {
   String name;
@@ -129,6 +130,30 @@ class DeviceData {
 class AppState extends ChangeNotifier {
   Map<String, DeviceData> _devices = {};
   Map<String, Timer?> _timers = {};
+  
+  // Helper to sync device status to server
+  void _syncDeviceToApi(String deviceId) {
+    print('🔄 (Sync) Triggering sync for $deviceId');
+    final device = getDeviceData(deviceId);
+    ApiSyncManager().updateDeviceStatus(
+      deviceId,
+      isRunning: device.isRunning,
+      elapsedSeconds: device.elapsedTime.inSeconds,
+      mode: device.mode,
+      customerCount: device.customerCount,
+      notes: device.notes,
+    );
+  }
+  
+  // Helper to sync orders to server
+  void _syncOrdersToApi(String deviceId) {
+    print('🔄 (Sync) Triggering orders sync for $deviceId');
+    final device = getDeviceData(deviceId);
+    ApiSyncManager().syncOrdersToApi(
+      deviceId, 
+      device.orders.map((e) => e.toJson()).toList()
+    );
+  }
   
   // قائمة الأجهزة المحذوفة لتجنب إعادة إنشائها
   Set<String> _deletedDevices = {};
@@ -813,6 +838,7 @@ class AppState extends ChangeNotifier {
     device.customerCount = count;
     notifyListeners();
     _saveToPrefs();
+    _syncDeviceToApi(deviceName);
   }
 
   void startTimer(String deviceName) {
@@ -837,6 +863,7 @@ class AppState extends ChangeNotifier {
         _saveToPrefs();
         saveCounter = 0;
         print('💾 حفظ تلقائي للمؤقت: $deviceName - الوقت: ${device.elapsedTime.toString().substring(0, 7)}');
+        _syncDeviceToApi(deviceName); // Auto-sync to API
       }
     });
 
@@ -844,6 +871,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     _saveToPrefs();
     print('✅ تم بدء وحفظ المؤقت: $deviceName');
+    _syncDeviceToApi(deviceName);
   }
 
   void stopTimer(String deviceName) {
@@ -860,6 +888,7 @@ class AppState extends ChangeNotifier {
     _emergencySave();
     
     print('✅ تم حفظ إيقاف المؤقت: $deviceName');
+    _syncDeviceToApi(deviceName);
   }
 
   void resetTimerOnly(String deviceName) {
@@ -870,6 +899,7 @@ class AppState extends ChangeNotifier {
     _timers.remove(deviceName);
     notifyListeners();
     _saveToPrefs();
+    _syncDeviceToApi(deviceName);
   }
 
   Duration getElapsedTime(String deviceName) {
@@ -897,6 +927,7 @@ class AppState extends ChangeNotifier {
     }
     notifyListeners();
     _saveToPrefs();
+    _syncOrdersToApi(deviceName);
   }
 
   /// إضافة عدة طلبات دفعة واحدة
@@ -914,6 +945,7 @@ class AppState extends ChangeNotifier {
     }
     notifyListeners();
     _saveToPrefs();
+    _syncOrdersToApi(deviceName);
   }
 
   void removeOrder(String deviceName, OrderItem order) {
@@ -921,6 +953,7 @@ class AppState extends ChangeNotifier {
     device.orders.remove(order);
     notifyListeners();
     _saveToPrefs();
+    _syncOrdersToApi(deviceName);
   }
 
   void removeOrderByIndex(String deviceName, int index) {
@@ -929,6 +962,7 @@ class AppState extends ChangeNotifier {
       device.orders.removeAt(index);
       notifyListeners();
       _saveToPrefs();
+      _syncOrdersToApi(deviceName);
     }
   }
 
@@ -938,6 +972,7 @@ class AppState extends ChangeNotifier {
       device.orders[index] = updatedOrder;
       notifyListeners();
       _saveToPrefs();
+      _syncOrdersToApi(deviceName);
     }
   }
 
@@ -1040,6 +1075,8 @@ class AppState extends ChangeNotifier {
     // حفظ البيانات
     _saveToPrefs().then((_) {
       print('resetDevice: Save completed for $deviceName');
+      _syncDeviceToApi(deviceName);
+      _syncOrdersToApi(deviceName);
     }).catchError((error) {
       print('resetDevice: Save failed for $deviceName: $error');
     });
@@ -1098,6 +1135,7 @@ class AppState extends ChangeNotifier {
     device.notes = note;
     notifyListeners();
     _saveToPrefs();
+    _syncDeviceToApi(deviceName);
   }
 
   String getMode(String deviceName) {
@@ -1114,6 +1152,7 @@ class AppState extends ChangeNotifier {
     print('Mode set successfully: ${device.mode}');
     notifyListeners();
     _saveToPrefs();
+    _syncDeviceToApi(deviceName);
   }
 
   void transferDeviceData(String fromDevice, String toDevice) {
@@ -1150,6 +1189,21 @@ class AppState extends ChangeNotifier {
 
     notifyListeners();
     _saveToPrefs();
+    
+    // Sync transfer to API
+    _syncTransferToApi(fromDevice, toDevice);
+  }
+  
+  /// Sync device transfer to API
+  Future<void> _syncTransferToApi(String fromDevice, String toDevice) async {
+    try {
+      final apiSync = ApiSyncManager();
+      await apiSync.transferDeviceViaApi(fromDevice, toDevice);
+      print('✅ Device transfer synced to API: $fromDevice -> $toDevice');
+    } catch (e) {
+      print('❌ Failed to sync transfer to API: $e');
+      // Don't throw - local transfer already succeeded
+    }
   }
 
   // Hive removed - server-only mode
@@ -1199,22 +1253,24 @@ class AppState extends ChangeNotifier {
 
   double calculatePrice(String deviceName, Duration elapsed, String mode) {
     double ratePerHour = 0;
+    final lowerName = deviceName.toLowerCase();
 
-    if (deviceName.startsWith('Pc')) {
+    if (lowerName.startsWith('pc')) {
       // استخدام السعر الفردي للجهاز PC
       ratePerHour = getPcPrice(deviceName);
-    } else if (deviceName.startsWith('Arabia')) {
+    } else if (lowerName.startsWith('arabia')) {
       // استخدام البنية الجديدة لأسعار PS4
       ratePerHour = getPs4Price(deviceName, mode);
-      print('calculatePrice for $deviceName: mode=$mode, rate=$ratePerHour');
-    } else if (deviceName.startsWith('Table')) {
+      // print('calculatePrice for $deviceName: mode=$mode, rate=$ratePerHour');
+    } else if (lowerName.startsWith('table')) {
       // استخدام السعر الفردي للطاولة
       ratePerHour = getTablePrice(deviceName);
-    } else if (deviceName.startsWith('Billiard')) {
+    } else if (lowerName.startsWith('billiard')) {
       // استخدام السعر الفردي للبيليارد
       ratePerHour = getBilliardPrice(deviceName);
     } else {
       ratePerHour = 0;
+      print('Warning: Unknown device type for pricing: $deviceName');
     }
 
     double price = (elapsed.inSeconds / 3600.0) * ratePerHour;
@@ -1312,8 +1368,13 @@ class AppState extends ChangeNotifier {
         _billiardPrices = Map<String, double>.from(pricesData['billiardPrices']);
       }
       
+      // Fix: Sync product prices (orderPrices)
+      if (pricesData['orderPrices'] != null) {
+        _orderPrices = Map<String, double>.from(pricesData['orderPrices']);
+      }
+      
       notifyListeners();
-      print('✅ Updated prices from API');
+      print('✅ Updated prices from API (Includes ${_orderPrices.length} product prices)');
     } catch (e) {
       print('❌ Error updating prices from API: $e');
     }
@@ -1322,6 +1383,7 @@ class AppState extends ChangeNotifier {
   /// Update categories from API response
   void updateCategoriesFromApi(List<dynamic> categoriesData) {
     try {
+      print('🔄 updateCategoriesFromApi called with ${categoriesData.length} categories');
       _customCategories.clear();
       for (var catData in categoriesData.whereType<Map<String, dynamic>>()) {
         final categoryName = catData['name'] as String?;
@@ -1331,10 +1393,12 @@ class AppState extends ChangeNotifier {
               ?.whereType<String>()
               .toList() ?? [];
           _customCategories[categoryName] = items;
+          print('  ✅ Category "$categoryName" loaded with ${items.length} items: $items');
         }
       }
       notifyListeners();
-      print('✅ Updated categories from API');
+      print('✅ Updated categories from API - Total: ${_customCategories.length} categories');
+      print('📋 All categories: ${_customCategories.keys.toList()}');
     } catch (e) {
       print('❌ Error updating categories from API: $e');
     }

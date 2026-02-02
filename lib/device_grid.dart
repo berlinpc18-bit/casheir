@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'app_state.dart';
 import 'device_details.dart';
+import 'receipt_preview_screen.dart';
 
 enum DeviceType { Pc, Arabia, Table, Billiard }
 
@@ -644,6 +645,69 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
                               children: [
                                 // محتوى الكارت (فارغ ليظهر فقط الخلفية)
                                 Positioned.fill(child: Container()),
+                                
+                                // Preview Button (Top Right) - Only show if has orders
+                                if (hasOrders)
+                                  Positioned(
+                                    top: 8,
+                                    right: 8,
+                                    child: Material(
+                                      color: Colors.transparent,
+                                      child: InkWell(
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) => ReceiptPreviewScreen(
+                                                deviceName: deviceName,
+                                                appState: appState,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: Colors.blue.withOpacity(0.9),
+                                            borderRadius: BorderRadius.circular(12),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.blue.withOpacity(0.4),
+                                                blurRadius: 8,
+                                                offset: const Offset(0, 2),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                Icons.receipt_long,
+                                                color: Colors.white,
+                                                size: 16,
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                () {
+                                                  final deviceOrders = appState.getOrders(deviceName);
+                                                  final total = deviceOrders.fold(0.0, (sum, o) => sum + (o.price * o.quantity));
+                                                  final rounded = ((total / 250).round().toDouble() * 250);
+                                                  return rounded.toStringAsFixed(0);
+                                                }(),
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                
                                 // الأيقونة والرقم في الأسفل مع تغويش
                                 Positioned(
                                   left: 0,

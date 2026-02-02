@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'app_state.dart';
@@ -45,6 +46,7 @@ class _DeviceDetailsState extends State<DeviceDetails>
     with TickerProviderStateMixin {
   late TabController _tabController;
   final TextEditingController _notesController = TextEditingController();
+  Timer? _notesDebounceTimer;
 
   @override
   void initState() {
@@ -55,15 +57,22 @@ class _DeviceDetailsState extends State<DeviceDetails>
       final appState = context.read<AppState>();
       _notesController.text = appState.getNote(widget.deviceName);
       
-      // Add listener to save notes automatically
+      // Add listener to save notes automatically with debounce
       _notesController.addListener(() {
-        appState.setNote(widget.deviceName, _notesController.text);
+        // Cancel previous timer
+        _notesDebounceTimer?.cancel();
+        
+        // Start new timer - sync after 500ms of no typing
+        _notesDebounceTimer = Timer(const Duration(milliseconds: 500), () {
+          appState.setNote(widget.deviceName, _notesController.text);
+        });
       });
     });
   }
 
   @override
   void dispose() {
+    _notesDebounceTimer?.cancel();
     _tabController.dispose();
     _notesController.dispose();
     super.dispose();

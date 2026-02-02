@@ -14,7 +14,7 @@ class ApiClient {
   }
   
   ApiClient._internal() {
-    baseUrl = 'http://192.168.0.135:8080';
+    baseUrl = 'http://localhost:8080';
     _httpClient = http.Client();
   }
   
@@ -239,6 +239,38 @@ class ApiClient {
     }
   }
   
+  /// Transfer device data from one device to another
+  /// POST /api/devices/transfer
+  Future<Map<String, dynamic>> transferDevice({
+    required String fromDeviceId,
+    required String toDeviceId,
+  }) async {
+    try {
+      final body = jsonEncode({
+        'fromDeviceId': fromDeviceId,
+        'toDeviceId': toDeviceId,
+      });
+      
+      final response = await _httpClient.post(
+        Uri.parse('$baseUrl/api/devices/transfer'),
+        headers: {'Content-Type': 'application/json'},
+        body: body,
+      ).timeout(const Duration(seconds: 30));
+      
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else if (response.statusCode == 400) {
+        throw ApiException('Invalid transfer request: ${response.body}');
+      } else if (response.statusCode == 404) {
+        throw ApiException('Source device not found: $fromDeviceId');
+      } else {
+        throw ApiException('Failed to transfer device: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw ApiException('Error transferring device: $e');
+    }
+  }
+  
   /// Check if server is reachable
   Future<bool> isServerAvailable() async {
     try {
@@ -248,6 +280,72 @@ class ApiClient {
       return response.statusCode < 500;
     } catch (_) {
       return false;
+    }
+  }
+  /// Update device status
+  /// POST /api/devices/update
+  Future<Map<String, dynamic>> updateDeviceStatus({
+    required String deviceId,
+    required bool isRunning,
+    required int elapsedSeconds,
+    required String mode,
+    required int customerCount,
+    String? notes,
+  }) async {
+    try {
+      final body = jsonEncode({
+        'deviceId': deviceId,
+        'isRunning': isRunning,
+        'elapsedSeconds': elapsedSeconds,
+        'mode': mode,
+        'customerCount': customerCount,
+        if (notes != null) 'notes': notes,
+        'startTime': DateTime.now().toIso8601String(), // Optional, but good for validation
+      });
+      
+      final response = await _httpClient.post(
+        Uri.parse('$baseUrl/api/devices/update'),
+        headers: {'Content-Type': 'application/json'},
+        body: body,
+      ).timeout(const Duration(seconds: 10)); // Shorter timeout for updates
+      
+      if (response.statusCode == 200 || response.statusCode == 201) {
+         final decoded = jsonDecode(response.body);
+         return decoded is Map<String, dynamic> ? decoded : {};
+      } else {
+        throw ApiException('Failed to update device status: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw ApiException('Error updating device status: $e');
+    }
+  }
+
+  /// Sync device orders (Full Sync)
+  /// POST /api/devices/orders/sync
+  Future<Map<String, dynamic>> syncDeviceOrders({
+    required String deviceId,
+    required List<Map<String, dynamic>> orders,
+  }) async {
+    try {
+      final body = jsonEncode({
+        'deviceId': deviceId,
+        'orders': orders,
+      });
+      
+      final response = await _httpClient.post(
+        Uri.parse('$baseUrl/api/devices/orders/sync'),
+        headers: {'Content-Type': 'application/json'},
+        body: body,
+      ).timeout(const Duration(seconds: 10));
+      
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final decoded = jsonDecode(response.body);
+        return decoded is Map<String, dynamic> ? decoded : {};
+      } else {
+        throw ApiException('Failed to sync orders: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw ApiException('Error syncing orders: $e');
     }
   }
 }
