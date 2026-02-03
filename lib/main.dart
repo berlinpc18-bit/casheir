@@ -26,28 +26,30 @@ import 'api_sync_manager.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // تهيئة إدارة النوافذ
-  await windowManager.ensureInitialized();
+  // تهيئة إدارة النوافذ (فقط للديسك توب)
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    await windowManager.ensureInitialized();
+    
+    WindowOptions windowOptions = const WindowOptions(
+      size: Size(1200, 800),
+      center: true,
+      backgroundColor: Colors.transparent,
+      skipTaskbar: false,
+      titleBarStyle: TitleBarStyle.normal,
+    );
+    
+    await windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
   
   // تهيئة خدمة الطابعات
   await PrinterService().ensureInitialized();
   
-  WindowOptions windowOptions = const WindowOptions(
-    size: Size(1200, 800),
-    center: true,
-    backgroundColor: Colors.transparent,
-    skipTaskbar: false,
-    titleBarStyle: TitleBarStyle.normal,
-  );
-  
-  await windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await windowManager.show();
-    await windowManager.focus();
-  });
-  
-  // Server-only mode - no local data persistence needed
-  // All data comes from server only
-  
+  // تهيئة عميل API وتحميل الإعدادات المحفوظة
+  await ApiClient().init();
+
   await initializeDateFormatting('ar');
 
   runApp(
@@ -2651,6 +2653,8 @@ class _DirectSaleTabState extends State<DirectSaleTab> {
         // حفظ الطلبات في نظام إدارة الحالة
         final appState = context.read<AppState>();
         appState.addOrders('البيع المباشر', orders);
+        
+        // No need for separate broadcast here as addOrders already does it.
         
         // تشغيل صوت النجاح
         SoundService().playCashRegister();

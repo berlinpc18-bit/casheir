@@ -33,10 +33,14 @@ class ApiSyncManager {
     if (!_useApi) return;
     
     try {
+      print('');
+      print('═══════════════════════════════════════════════════');
+      print('🔄 SYNCING DEVICES FROM SERVER...');
+      print('═══════════════════════════════════════════════════');
+      
       final response = await _apiClient.getDevices();
       
-      // Clear all old devices - trust ONLY the API response
-      appState.devices.clear();
+      // Merge server devices with local devices (don't clear - preserve transferred devices)
       
       // Response is already unwrapped by API client
       if (response is Map && response.isNotEmpty) {
@@ -57,10 +61,33 @@ class ApiSyncManager {
             }
           }
         }
-        print('✅ Synced ${response.length} devices from SERVER');
+        print('✅ Synced ${response.length} devices from SERVER (merged with local)');
       } else {
         print('⚠️ SERVER has no devices');
       }
+      
+      // Always check for devices to remove (even if server is empty)
+      final serverDeviceIds = response is Map ? response.keys.toSet() : <String>{};
+      final localDeviceIds = appState.devices.keys.toList();
+      
+      print('🔍 Checking for devices to remove...');
+      print('   Server has: ${serverDeviceIds.isEmpty ? "NONE" : serverDeviceIds.join(", ")}');
+      print('   Local has: ${localDeviceIds.join(", ")}');
+      
+      for (var localId in localDeviceIds) {
+        if (!serverDeviceIds.contains(localId)) {
+          final device = appState.devices[localId]!;
+          print('   📋 Device $localId not on server:');
+          print('      - Orders: ${device.orders.length}');
+          print('      - Running: ${device.isRunning}');
+          print('      - Elapsed: ${device.elapsedTime.inSeconds}s');
+          
+          // Remove ALL devices not on server (server is source of truth)
+          print('   🗑️ Removing device $localId (deleted on server)');
+          appState.removeDeviceFromSocket(localId);
+        }
+      }
+      
       appState.notifyListeners();
     } catch (e) {
       print('❌ Error syncing devices from SERVER: $e');
@@ -234,6 +261,14 @@ class ApiSyncManager {
         notes: notes,
       );
       // print('✅ Device updated on server: $deviceId'); // Commented to reduce noise
+    } on ApiException catch (e) {
+      // Silently ignore 404 errors (device was deleted/transferred)
+      if (e.message.contains('404') || e.message.contains('not found')) {
+        print('ℹ️ Device $deviceId not found on server (may have been transferred/deleted)');
+        return;
+      }
+      print('❌ Error updating device on server: $e');
+      // Don't rethrow to avoid breaking UI for offline usage
     } catch (e) {
       print('❌ Error updating device on server: $e');
       // Don't rethrow to avoid breaking UI for offline usage

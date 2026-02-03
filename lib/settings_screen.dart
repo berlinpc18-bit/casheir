@@ -14,6 +14,7 @@ import 'device_management_screen.dart';
 import 'sound_service.dart';
 import 'api_client.dart';
 import 'api_sync_manager.dart';
+import 'app_logger.dart';
 import 'printer_settings_screen.dart';
 import 'license_manager.dart';
 import 'backup_management_screen.dart';
@@ -269,6 +270,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 24),
             
+            // سجل النظام
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.brown.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.history_edu, color: Colors.brown),
+              ),
+              title: const Text('سجل النظام (Debug Logs)'),
+              subtitle: const Text('عرض سجلات الأخطاء والعمليات'),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (context) => const LogViewerScreen()),
+                );
+              },
+            ),
+            const SizedBox(height: 24),
+
             // حول التطبيق
             _buildAboutSection(),
           ],
@@ -686,6 +708,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _testApiConnection() async {
     final url = _apiServerController.text.trim();
+    AppLogger().info('User initiated connection test to: $url', 'SETTINGS');
     
     if (url.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(

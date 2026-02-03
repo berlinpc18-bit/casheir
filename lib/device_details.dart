@@ -59,6 +59,8 @@ class _DeviceDetailsState extends State<DeviceDetails>
       
       // Add listener to save notes automatically with debounce
       _notesController.addListener(() {
+        if (!_notesController.selection.isValid) return; // Prevent sync while just setting text
+        
         // Cancel previous timer
         _notesDebounceTimer?.cancel();
         
@@ -188,6 +190,22 @@ class _DeviceDetailsState extends State<DeviceDetails>
         final running = appState.isRunning(widget.deviceName);
         final mode = appState.getMode(widget.deviceName);
         final price = appState.calculatePrice(widget.deviceName, elapsed, mode);
+        final deviceNote = appState.getNote(widget.deviceName);
+
+        // 📝 Sync notes from external source if user isn't currently typing
+        if (_notesController.text != deviceNote && (_notesDebounceTimer == null || !_notesDebounceTimer!.isActive)) {
+           // We use postFrameCallback to avoid updating controller during build
+           WidgetsBinding.instance.addPostFrameCallback((_) {
+             if (mounted && _notesController.text != deviceNote) {
+                // Preserving cursor position if possible
+                final selection = _notesController.selection;
+                _notesController.text = deviceNote;
+                if (selection.isValid && selection.baseOffset <= deviceNote.length) {
+                  _notesController.selection = selection;
+                }
+             }
+           });
+        }
 
         // الحصول على جميع الأجهزة المحفوظة
         final allDevicesFromState = appState.devices.keys.toList();
@@ -951,8 +969,8 @@ class _OrdersTabState extends State<OrdersTab> {
                       orderItems,
                     );
                     
-                    // Sync device orders from API to get latest list
-                    await apiSync.syncDeviceOrders(appState, widget.deviceName);
+                    // Add to local state and broadcast (API already has it, so skip API sync)
+                    appState.addOrdersWithoutApiSync(widget.deviceName, result);
                     
                     // Show success message
                     if (mounted) {
@@ -1142,18 +1160,11 @@ class _OrdersTabState extends State<OrdersTab> {
                                                 ),
                                               );
                                               
-                                              if (result != null && result.isNotEmpty) {
-                                                // Update the existing order with new values
-                                                final updatedOrder = result.first;
-                                                order.name = updatedOrder.name;
-                                                order.price = updatedOrder.price;
-                                                order.quantity = updatedOrder.quantity;
-                                                order.lastOrderTime = DateTime.now();
-                                                order.notes = updatedOrder.notes;
-                                                
-                                                // Trigger UI update
-                                                context.read<AppState>().notifyListeners();
-                                              }
+                                                if (result != null && result.isNotEmpty) {
+                                                  // Update the existing order with new values
+                                                  final updatedOrder = result.first;
+                                                  appState.updateOrder(widget.deviceName, index, updatedOrder);
+                                                }
                                             },
                                             icon: const Icon(
                                               Icons.edit_rounded,

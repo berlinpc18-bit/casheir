@@ -2,7 +2,7 @@ name: berlin_gaming_cashier
 description: "تطبيق كاشير صالة ألعاب إلكترونية."
 publish_to: 'none' # لإبقاء المشروع خاص
 
-version: 1.0.0
+version: 1.0.1+4
 
 environment:
   sdk: ">=2.18.0 <3.0.0"
@@ -49,7 +49,7 @@ dependencies:
   # firebase_database: ^10.2.0
   connectivity_plus: ^5.0.0
   uuid: ^4.0.0
-  web_socket_channel: ^2.4.0
+  web_socket_channel: ^3.0.3
 
 dev_dependencies:
   flutter_test:

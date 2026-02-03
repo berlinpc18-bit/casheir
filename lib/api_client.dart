@@ -1,26 +1,49 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'app_logger.dart';
 
 /// API Client for communicating with the external server
 /// Base URL: http://localhost:8080 (configurable)
 class ApiClient {
   static final ApiClient _instance = ApiClient._internal();
   
-  late String baseUrl;
+  String baseUrl = 'http://localhost:8080';
   late http.Client _httpClient;
+  static const String _baseUrlKey = 'api_base_url';
   
   factory ApiClient() {
     return _instance;
   }
   
   ApiClient._internal() {
-    baseUrl = 'http://localhost:8080';
     _httpClient = http.Client();
+  }
+
+  /// Initialize and load saved URL
+  Future<void> init() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedUrl = prefs.getString(_baseUrlKey);
+      if (savedUrl != null && savedUrl.isNotEmpty) {
+        baseUrl = savedUrl;
+        AppLogger().info('Loaded saved API URL: $baseUrl', 'API');
+      }
+    } catch (e) {
+      AppLogger().error('Failed to load saved API URL: $e', 'API');
+    }
   }
   
   /// Set custom base URL (for testing or different server)
-  void setBaseUrl(String url) {
+  Future<void> setBaseUrl(String url) async {
+    AppLogger().info('Changing Base URL to: $url', 'API');
     baseUrl = url;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_baseUrlKey, url);
+    } catch (e) {
+      AppLogger().error('Failed to save API URL: $e', 'API');
+    }
   }
   
   /// Get all devices
@@ -42,6 +65,7 @@ class ApiClient {
         throw ApiException('Failed to get devices: ${response.statusCode}');
       }
     } catch (e) {
+      AppLogger().error('Error getting devices: $e', 'API');
       throw ApiException('Error getting devices: $e');
     }
   }
@@ -273,12 +297,21 @@ class ApiClient {
   
   /// Check if server is reachable
   Future<bool> isServerAvailable() async {
+    AppLogger().info('Testing connection to: $baseUrl...', 'API');
     try {
       final response = await _httpClient.get(
         Uri.parse('$baseUrl/api/devices'),
       ).timeout(const Duration(seconds: 5));
-      return response.statusCode < 500;
-    } catch (_) {
+      
+      if (response.statusCode < 500) {
+        AppLogger().info('✓ Connection successful! (Status: ${response.statusCode})', 'API');
+        return true;
+      } else {
+        AppLogger().warning('Connection returned error status: ${response.statusCode}', 'API');
+        return false;
+      }
+    } catch (e) {
+      AppLogger().error('Connection failed: $e', 'API');
       return false;
     }
   }

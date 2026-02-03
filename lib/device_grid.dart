@@ -395,7 +395,7 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
                   crossAxisCount: _getCrossAxisCount(context),
                   mainAxisSpacing: 16,
                   crossAxisSpacing: 16,
-                  childAspectRatio: 1.25, // تصغير الكارت ليكون أعرض وأقل ارتفاعًا
+                  childAspectRatio: _getChildAspectRatio(context),
                 ),
                 itemBuilder: (context, index) {
                   final deviceName = devices[index];
@@ -409,12 +409,21 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
     );
   }
 
+  double _getChildAspectRatio(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    if (width < 400) return 1.5; // Wider cards for single column
+    if (width < 600) return 0.85; // Taller cards for mobile 2 columns
+    return 1.1; // Default for desktop
+  }
+
   int _getCrossAxisCount(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
+    if (width > 1600) return 8;
     if (width > 1200) return 6;
-    if (width > 800) return 4;
+    if (width > 900) return 4;
     if (width > 600) return 3;
-    return 2;
+    if (width > 400) return 2;
+    return 1; // For very small phones
   }
 
   Widget _buildCategoryHeader(String title) {

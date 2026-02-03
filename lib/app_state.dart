@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'printer_service.dart';
 import 'api_sync_manager.dart'; // Add import
+import 'websocket_manager.dart';
 
 class OrderItem {
   String name;
@@ -31,17 +32,22 @@ class OrderItem {
         'name': name,
         'price': price,
         'quantity': quantity,
-        'firstOrderTime': firstOrderTime.toIso8601String(),
-        'lastOrderTime': lastOrderTime.toIso8601String(),
+        // Truncate to seconds to match server precision and avoid duplicate detection failure
+        'firstOrderTime': firstOrderTime.toIso8601String().split('.')[0], 
+        'lastOrderTime': lastOrderTime.toIso8601String().split('.')[0],
         'notes': notes,
       };
 
   factory OrderItem.fromJson(Map<String, dynamic> json) => OrderItem(
-        name: json['name'],
-        price: json['price'],
-        quantity: json['quantity'],
-        firstOrderTime: DateTime.parse(json['firstOrderTime']),
-        lastOrderTime: DateTime.parse(json['lastOrderTime']),
+        name: json['name']?.toString() ?? 'Error',
+        price: (json['price'] as num?)?.toDouble() ?? 0.0,
+        quantity: (json['quantity'] as num?)?.toInt() ?? 1,
+        firstOrderTime: json['firstOrderTime'] != null 
+            ? DateTime.parse(json['firstOrderTime']) 
+            : DateTime.now(),
+        lastOrderTime: json['lastOrderTime'] != null 
+            ? DateTime.parse(json['lastOrderTime']) 
+            : DateTime.now(),
         notes: json['notes'],
       );
 }
@@ -128,6 +134,8 @@ class DeviceData {
 }
 
 class AppState extends ChangeNotifier {
+
+
   Map<String, DeviceData> _devices = {};
   Map<String, Timer?> _timers = {};
   
@@ -135,6 +143,8 @@ class AppState extends ChangeNotifier {
   void _syncDeviceToApi(String deviceId) {
     print('🔄 (Sync) Triggering sync for $deviceId');
     final device = getDeviceData(deviceId);
+    
+    // HTTP Sync
     ApiSyncManager().updateDeviceStatus(
       deviceId,
       isRunning: device.isRunning,
@@ -143,16 +153,30 @@ class AppState extends ChangeNotifier {
       customerCount: device.customerCount,
       notes: device.notes,
     );
+    
+    // WebSocket Sync (Broadcast to other clients)
+    WebSocketManager().sendMessage({
+      'type': 'device_update', // Client -> Server uses 'device_update'
+      'deviceId': deviceId,
+      'data': {
+        'isRunning': device.isRunning,
+        'elapsedSeconds': device.elapsedTime.inSeconds,
+        'mode': device.mode,
+        'customerCount': device.customerCount,
+        'notes': device.notes,
+      },
+      'timestamp': DateTime.now().toIso8601String(),
+    });
   }
   
-  // Helper to sync orders to server
+  // Helper to sync orders to server (HTTP ONLY)
   void _syncOrdersToApi(String deviceId) {
-    print('🔄 (Sync) Triggering orders sync for $deviceId');
+    print('🔄 (Sync) Triggering orders HTTP sync for $deviceId');
     final device = getDeviceData(deviceId);
-    ApiSyncManager().syncOrdersToApi(
-      deviceId, 
-      device.orders.map((e) => e.toJson()).toList()
-    );
+    final ordersJson = device.orders.map((e) => e.toJson()).toList();
+    
+    // HTTP Sync ONLY - WebSocket is now handled per-action for efficiency and to avoid duplicates
+    ApiSyncManager().syncOrdersToApi(deviceId, ordersJson);
   }
   
   // قائمة الأجهزة المحذوفة لتجنب إعادة إنشائها
@@ -162,6 +186,9 @@ class AppState extends ChangeNotifier {
   
   // للتحكم في عمليات الحفظ المتزامنة
   bool _isSaving = false;
+  
+  // Track devices being transferred to prevent deletion
+  Set<String> _transferringDevices = {};
   
   // أسعار الأجهزة
   double _pcPrice = 1500.0; // سعر افتراضي عام للـ PC
@@ -205,11 +232,24 @@ class AppState extends ChangeNotifier {
   
   // إعدادات الثيم
   bool _isDarkMode = true;
+  
+  // حالة الاتصال
+  bool _isOnline = false;
+  bool get isOnline => _isOnline;
+
+  void setOnlineStatus(bool status) {
+    if (_isOnline != status) {
+      _isOnline = status;
+      notifyListeners();
+    }
+  }
 
   AppState() {
     print('🚀 بدء تحميل البيانات من النظام المحسن...');
     _loadFromPrefs();
     initializeAutoSave(); // 🚀 تفعيل نظام الحفظ التلقائي فور بناء الكلاس
+    WebSocketManager().init(this); // Initialize WebSocket
+    
     
     // حفظ فوري للتأكد من عمل النظام
     Future.delayed(Duration(seconds: 3), () async {
@@ -683,6 +723,14 @@ class AppState extends ChangeNotifier {
     await _saveToPrefs();
     
     print('removeDevice: Save completed for $deviceName');
+    
+    // WebSocket Sync
+    WebSocketManager().sendMessage({
+      'type': 'device_deleted',
+      'deviceId': deviceName,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+
     print('=== removeDevice finished for: $deviceName ===');
   }
   
@@ -922,8 +970,25 @@ class AppState extends ChangeNotifier {
       final existing = orders[index];
       existing.quantity += newOrder.quantity;
       existing.lastOrderTime = DateTime.now();
+      
+      // Sync update via WebSocket
+      WebSocketManager().sendMessage({
+        'type': 'order_updated',
+        'deviceId': deviceName,
+        'orderIndex': index,
+        'data': existing.toJson(),
+        'timestamp': DateTime.now().toIso8601String(),
+      });
     } else {
       orders.add(newOrder);
+      
+      // Sync add via WebSocket
+      WebSocketManager().sendMessage({
+        'type': 'order_placed',
+        'deviceId': deviceName,
+        'orders': [newOrder.toJson()],
+        'timestamp': DateTime.now().toIso8601String(),
+      });
     }
     notifyListeners();
     _saveToPrefs();
@@ -933,19 +998,92 @@ class AppState extends ChangeNotifier {
   /// إضافة عدة طلبات دفعة واحدة
   void addOrders(String deviceName, List<OrderItem> newOrders) {
     final device = getDeviceData(deviceName);
+    List<OrderItem> actuallyAdded = [];
+    
     for (var newOrder in newOrders) {
-      int index = device.orders.indexWhere((o) => o.name == newOrder.name);
+      int index = device.orders.indexWhere((o) => 
+        o.name == newOrder.name && o.firstOrderTime.isAtSameMomentAs(newOrder.firstOrderTime)
+      );
       if (index >= 0) {
         final existing = device.orders[index];
         existing.quantity += newOrder.quantity;
         existing.lastOrderTime = DateTime.now();
+        
+        WebSocketManager().sendMessage({
+          'type': 'order_updated',
+          'deviceId': deviceName,
+          'orderIndex': index,
+          'data': existing.toJson(),
+        });
       } else {
         device.orders.add(newOrder);
+        actuallyAdded.add(newOrder);
       }
     }
+    
+    if (actuallyAdded.isNotEmpty) {
+      WebSocketManager().sendMessage({
+        'type': 'order_placed',
+        'deviceId': deviceName,
+        'orders': actuallyAdded.map((o) => o.toJson()).toList(),
+      });
+    }
+    
     notifyListeners();
     _saveToPrefs();
     _syncOrdersToApi(deviceName);
+  }
+
+  /// Broadcasts new orders without saving them locally (used when API already did the work)
+  void broadcastNewOrders(String deviceName, List<OrderItem> orders) {
+    if (orders.isEmpty) return;
+    
+    print('📡 Broadcasting ${orders.length} new orders for $deviceName');
+    WebSocketManager().sendMessage({
+      'type': 'order_placed',
+      'deviceId': deviceName,
+      'orders': orders.map((o) => o.toJson()).toList(),
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+  }
+
+  /// Add orders locally and broadcast, but skip API sync (used when API already saved them)
+  void addOrdersWithoutApiSync(String deviceName, List<OrderItem> newOrders) {
+    final device = getDeviceData(deviceName);
+    List<OrderItem> actuallyAdded = [];
+    
+    for (var newOrder in newOrders) {
+      int index = device.orders.indexWhere((o) => 
+        o.name == newOrder.name && o.firstOrderTime.toIso8601String().split('.')[0] == newOrder.firstOrderTime.toIso8601String().split('.')[0]
+      );
+      if (index >= 0) {
+        final existing = device.orders[index];
+        existing.quantity += newOrder.quantity;
+        existing.lastOrderTime = DateTime.now();
+        
+        WebSocketManager().sendMessage({
+          'type': 'order_updated',
+          'deviceId': deviceName,
+          'orderIndex': index,
+          'data': existing.toJson(),
+        });
+      } else {
+        device.orders.add(newOrder);
+        actuallyAdded.add(newOrder);
+      }
+    }
+    
+    if (actuallyAdded.isNotEmpty) {
+      WebSocketManager().sendMessage({
+        'type': 'order_placed',
+        'deviceId': deviceName,
+        'orders': actuallyAdded.map((o) => o.toJson()).toList(),
+      });
+    }
+    
+    notifyListeners();
+    _saveToPrefs();
+    // Note: NO _syncOrdersToApi call here since API already has the data
   }
 
   void removeOrder(String deviceName, OrderItem order) {
@@ -960,6 +1098,14 @@ class AppState extends ChangeNotifier {
     final device = getDeviceData(deviceName);
     if (index >= 0 && index < device.orders.length) {
       device.orders.removeAt(index);
+      
+      // Sync delete via WebSocket
+      WebSocketManager().sendMessage({
+        'type': 'order_deleted',
+        'deviceId': deviceName,
+        'orderIndex': index,
+      });
+      
       notifyListeners();
       _saveToPrefs();
       _syncOrdersToApi(deviceName);
@@ -970,6 +1116,15 @@ class AppState extends ChangeNotifier {
     final device = getDeviceData(deviceName);
     if (index >= 0 && index < device.orders.length) {
       device.orders[index] = updatedOrder;
+      
+      // Sync update via WebSocket
+      WebSocketManager().sendMessage({
+        'type': 'order_updated',
+        'deviceId': deviceName,
+        'orderIndex': index,
+        'data': updatedOrder.toJson(),
+      });
+      
       notifyListeners();
       _saveToPrefs();
       _syncOrdersToApi(deviceName);
@@ -1077,6 +1232,13 @@ class AppState extends ChangeNotifier {
       print('resetDevice: Save completed for $deviceName');
       _syncDeviceToApi(deviceName);
       _syncOrdersToApi(deviceName);
+      
+      // WebSocket Sync
+      WebSocketManager().sendMessage({
+        'type': 'device_reset',
+        'deviceId': deviceName,
+        'timestamp': DateTime.now().toIso8601String(),
+      });
     }).catchError((error) {
       print('resetDevice: Save failed for $deviceName: $error');
     });
@@ -1132,6 +1294,8 @@ class AppState extends ChangeNotifier {
 
   void setNote(String deviceName, String note) {
     final device = getDeviceData(deviceName);
+    if (device.notes == note) return; // Skip if no change
+    
     device.notes = note;
     notifyListeners();
     _saveToPrefs();
@@ -1160,6 +1324,7 @@ class AppState extends ChangeNotifier {
     final fromData = _devices[fromDevice]!;
     final toData = _devices[toDevice] ?? DeviceData(name: toDevice);
 
+    // Transfer all data to destination
     toData.elapsedTime = fromData.elapsedTime;
     toData.isRunning = fromData.isRunning;
 
@@ -1177,11 +1342,18 @@ class AppState extends ChangeNotifier {
     toData.mode = fromData.mode;
     toData.customerCount = fromData.customerCount;
 
-    _devices.remove(fromDevice);
-    _devices[toDevice] = toData;
-
+    // Reset source device to clean state (don't delete it)
+    fromData.isRunning = false;
+    fromData.elapsedTime = Duration.zero;
+    fromData.orders.clear();
+    fromData.notes = '';
+    fromData.mode = 'single';
+    fromData.customerCount = 1;
+    
     _timers[fromDevice]?.cancel();
     _timers.remove(fromDevice);
+
+    _devices[toDevice] = toData;
 
     if (toData.isRunning) {
       startTimer(toDevice);
@@ -1190,19 +1362,33 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     _saveToPrefs();
     
+    // Mark device as transferring to prevent deletion from socket
+    _transferringDevices.add(fromDevice);
+    
     // Sync transfer to API
     _syncTransferToApi(fromDevice, toDevice);
+    
+    // Remove from transferring set after a delay
+    Future.delayed(Duration(seconds: 2), () {
+      _transferringDevices.remove(fromDevice);
+    });
   }
   
-  /// Sync device transfer to API
   Future<void> _syncTransferToApi(String fromDevice, String toDevice) async {
     try {
       final apiSync = ApiSyncManager();
       await apiSync.transferDeviceViaApi(fromDevice, toDevice);
       print('✅ Device transfer synced to API: $fromDevice -> $toDevice');
+      
+      // WebSocket Sync
+      WebSocketManager().sendMessage({
+        'type': 'device_transfer', // Client -> Server uses 'device_transfer'
+        'fromDeviceId': fromDevice,
+        'toDeviceId': toDevice,
+        'timestamp': DateTime.now().toIso8601String(),
+      });
     } catch (e) {
       print('❌ Failed to sync transfer to API: $e');
-      // Don't throw - local transfer already succeeded
     }
   }
 
@@ -1305,6 +1491,10 @@ class AppState extends ChangeNotifier {
     try {
       final device = DeviceData.fromJson(data);
       _devices[deviceId] = device;
+      
+      // Note: We don't broadcast here anymore because HTTP sync is meant to be a fetch,
+      // and local changes already broadcast themselves.
+      
       notifyListeners();
       print('✅ Updated device $deviceId from API');
     } catch (e) {
@@ -1321,6 +1511,9 @@ class AppState extends ChangeNotifier {
             .map((e) => OrderItem.fromJson(e))
             .toList();
         _devices[deviceId]!.orders = orders;
+
+        // Note: No broadcast here either to avoid additive duplication on other clients
+        
         notifyListeners();
         print('✅ Updated orders for $deviceId from API');
       }
@@ -1432,5 +1625,198 @@ class AppState extends ChangeNotifier {
     } catch (e) {
       print('❌ Error updating expenses from API: $e');
     }
+  }
+
+  // ============================================
+  // 🔌 WebSocket Handlers (Direct State Update)
+  // ============================================
+
+  void updateDeviceStatusFromSocket(String deviceId, {
+    required bool isRunning,
+    required int elapsedSeconds,
+    required String mode,
+    required int customerCount,
+    required String notes,
+  }) {
+    final device = _devices[deviceId] ?? DeviceData(name: deviceId);
+    if (!_devices.containsKey(deviceId)) {
+        _devices[deviceId] = device;
+    }
+    
+    // Update local state directly
+    device.isRunning = isRunning;
+    device.elapsedTime = Duration(seconds: elapsedSeconds);
+    device.mode = mode;
+    device.customerCount = customerCount;
+    device.notes = notes;
+    
+    // Manage local timer for visual smoothness
+    if (isRunning) {
+        if (!(_timers[deviceId]?.isActive ?? false)) {
+             _startLocalTimerOnly(deviceId);
+        }
+    } else {
+        _timers[deviceId]?.cancel();
+        _timers.remove(deviceId);
+    }
+    
+    notifyListeners();
+    print('🔌 Device updated from socket: $deviceId');
+  }
+  
+  void _startLocalTimerOnly(String deviceName) {
+      if (_timers[deviceName] != null) return;
+      final device = getDeviceData(deviceName);
+      
+      _timers[deviceName] = Timer.periodic(const Duration(seconds: 1), (_) {
+          device.elapsedTime += const Duration(seconds: 1);
+          notifyListeners();
+      });
+  }
+
+  void addOrdersFromSocket(String deviceId, List<OrderItem> newOrders) {
+    print('🔌 Adding orders from socket to $deviceId: ${newOrders.length} items');
+    if (!_devices.containsKey(deviceId)) return;
+    final device = _devices[deviceId]!;
+    
+    for (var newOrder in newOrders) {
+        // Truncate incoming time for comparison
+        final newOrderTime = newOrder.firstOrderTime.toIso8601String().split('.')[0];
+        
+        // Prevent duplicates by checking name and second-precision timestamp
+        final exists = device.orders.any((o) => 
+            o.name == newOrder.name && 
+            o.firstOrderTime.toIso8601String().split('.')[0] == newOrderTime
+        );
+        
+        if (!exists) {
+            device.orders.add(newOrder);
+            print('💡 Added new order item from socket: ${newOrder.name}');
+        } else {
+            print('⏩ Skipped duplicate order item from socket: ${newOrder.name}');
+        }
+    }
+    notifyListeners();
+  }
+
+  void updateOrdersFromSocket(String deviceId, List<OrderItem> orders) {
+    print('🔌 updateOrdersFromSocket start: $deviceId with ${orders.length} items');
+    // Ensure device exists
+    if (!_devices.containsKey(deviceId)) {
+        _devices[deviceId] = DeviceData(name: deviceId);
+        print('🔌 Created device $deviceId for orders');
+    }
+    
+    final device = _devices[deviceId]!;
+    // Use clear/addAll to preserve potential listeners to the list itself
+    device.orders.clear();
+    device.orders.addAll(orders);
+    
+    notifyListeners();
+    print('✅ updateOrdersFromSocket complete: $deviceId now has ${device.orders.length} items');
+  }
+  
+  void updateOrderFromSocket(String deviceId, int index, OrderItem updatedOrder) {
+      if (!_devices.containsKey(deviceId)) return;
+      final device = _devices[deviceId]!;
+      
+      if (index >= 0 && index < device.orders.length) {
+          device.orders[index] = updatedOrder;
+          notifyListeners();
+          print('🔌 Order #$index updated from socket on $deviceId');
+      }
+  }
+  
+  void removeOrderFromSocket(String deviceId, int index) {
+      if (!_devices.containsKey(deviceId)) return;
+      final device = _devices[deviceId]!;
+      
+      if (index >= 0 && index < device.orders.length) {
+          device.orders.removeAt(index);
+          notifyListeners();
+           print('🔌 Order #$index removed from socket on $deviceId');
+      }
+  }
+
+  void removeDeviceFromSocket(String deviceId) {
+    // Don't delete if device is being transferred
+    if (_transferringDevices.contains(deviceId)) {
+      print('⏩ Ignoring device removal for $deviceId - transfer in progress');
+      return;
+    }
+    
+    if (_devices.containsKey(deviceId)) {
+      _timers[deviceId]?.cancel();
+      _timers.remove(deviceId);
+      _devices.remove(deviceId);
+      _deletedDevices.add(deviceId);
+      notifyListeners();
+      print('🔌 Device removed from socket: $deviceId');
+    }
+  }
+
+  void resetDeviceFromSocket(String deviceId) {
+    if (!_devices.containsKey(deviceId)) {
+       // If it doesn't exist, we don't need to reset it, 
+       // but we add it to deleted to prevent ghost updates
+       _deletedDevices.add(deviceId);
+       return;
+    }
+    _timers[deviceId]?.cancel();
+    _timers.remove(deviceId);
+      final device = _devices[deviceId]!;
+      device.orders.clear();
+      device.reservations.clear();
+      device.isRunning = false;
+      device.elapsedTime = Duration.zero;
+      device.notes = '';
+      device.mode = 'single';
+      device.customerCount = 1;
+      notifyListeners();
+      print('🔌 Device reset from socket: $deviceId');
+  }
+
+  void transferDeviceDataFromSocket(String fromDevice, String toDevice) {
+    if (!_devices.containsKey(fromDevice)) return;
+    final fromData = _devices[fromDevice]!;
+    final toData = _devices[toDevice] ?? DeviceData(name: toDevice);
+
+    // Transfer all data to destination
+    toData.elapsedTime = fromData.elapsedTime;
+    toData.isRunning = fromData.isRunning;
+
+    for (var order in fromData.orders) {
+      int index = toData.orders.indexWhere((o) => o.name == order.name);
+      if (index >= 0) {
+        toData.orders[index].quantity += order.quantity;
+        toData.orders[index].lastOrderTime = DateTime.now();
+      } else {
+        toData.orders.add(order);
+      }
+    }
+
+    toData.notes = fromData.notes;
+    toData.mode = fromData.mode;
+    toData.customerCount = fromData.customerCount;
+
+    // Reset source device to clean state (don't delete it)
+    fromData.isRunning = false;
+    fromData.elapsedTime = Duration.zero;
+    fromData.orders.clear();
+    fromData.notes = '';
+    fromData.mode = 'single';
+    fromData.customerCount = 1;
+    
+    _timers[fromDevice]?.cancel();
+    _timers.remove(fromDevice);
+
+    _devices[toDevice] = toData;
+
+    if (toData.isRunning) {
+      _startLocalTimerOnly(toDevice); // Use local timer only
+    }
+
+    notifyListeners();
+    print('🔌 Device transfer processed from socket: $fromDevice -> $toDevice');
   }
 }

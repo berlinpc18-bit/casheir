@@ -27,4 +27,4 @@ echo Starting app...
 echo  'r' = Hot Reload
 echo  'R' = Hot Restart
 echo.
-flutter run -d windows
+flutter run -d windows 

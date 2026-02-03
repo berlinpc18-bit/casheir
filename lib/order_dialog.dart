@@ -361,6 +361,8 @@ class _OrderDialogState extends State<OrderDialog>
               ),
               child: TabBar(
                 controller: _tabController,
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
                 tabs: tabs,
                 indicator: BoxDecoration(
                   gradient: const LinearGradient(

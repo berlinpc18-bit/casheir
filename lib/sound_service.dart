@@ -92,9 +92,14 @@ class SoundService {
   // تشغيل الأصوات من ملفات Assets
   Future<void> _playAssetSound(String soundPath) async {
     try {
-      await _audioPlayer.play(AssetSource(soundPath));
+      // Ensure we are calling this on the main thread to avoid "non-platform thread" errors
+      // especially on Windows/Native platforms
+      await Future.microtask(() async {
+        await _audioPlayer.stop(); // Stop previous for better responsiveness
+        await _audioPlayer.play(AssetSource(soundPath));
+      });
     } catch (e) {
-      // في حالة فشل تشغيل الملف الصوتي، استخدم صوت النظام كبديل
+      print('🔊 Sound Error: $e');
       _playSystemSound();
     }
   }
