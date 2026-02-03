@@ -44,20 +44,23 @@ class ApiSyncManager {
       
       // Response is already unwrapped by API client
       if (response is Map && response.isNotEmpty) {
+        print('📥 Server returned ${response.length} devices: ${response.keys.join(", ")}');
+        
         for (var entry in response.entries) {
           final deviceId = entry.key;
           final deviceData = entry.value;
           
           if (deviceData is Map<String, dynamic>) {
+            print('   ⬇️ Syncing device: $deviceId');
             appState.updateDeviceFromApi(deviceId, deviceData);
             
             // Also fetch orders for this device
             try {
               final orders = await _apiClient.getDeviceOrders(deviceId);
               appState.updateDeviceOrdersFromApi(deviceId, orders);
-              print('  ✅ Synced orders for $deviceId');
+              print('      ✅ Synced orders for $deviceId');
             } catch (e) {
-              print('  ⚠️ Could not sync orders for $deviceId: $e');
+              print('      ⚠️ Could not sync orders for $deviceId: $e');
             }
           }
         }
