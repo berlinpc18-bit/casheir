@@ -91,6 +91,11 @@ class ApiSyncManager {
         }
       }
       
+      print('');
+      print('📊 SYNC COMPLETE - Final device count: ${appState.devices.length}');
+      print('   Devices in app: ${appState.devices.keys.join(", ")}');
+      print('');
+      
       appState.notifyListeners();
     } catch (e) {
       print('❌ Error syncing devices from SERVER: $e');

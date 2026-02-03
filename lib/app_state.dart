@@ -281,10 +281,16 @@ class AppState extends ChangeNotifier {
   }
   
   // Getter للأجهزة
-  Map<String, DeviceData> get devices => Map.from(_devices);
+  Map<String, DeviceData> get devices {
+    print('🔍 UI accessing devices - Count: ${_devices.length}, Keys: ${_devices.keys.join(", ")}');
+    return Map.from(_devices);
+  }
   
   // Getter للأجهزة المحذوفة  
-  Set<String> get deletedDevices => Set.from(_deletedDevices);
+  Set<String> get deletedDevices {
+    print('🗑️ Deleted devices set: ${_deletedDevices.join(", ")}');
+    return Set.from(_deletedDevices);
+  }
   
   // 🚀 تهيئة نظام الحفظ التلقائي
   void initializeAutoSave() {
@@ -1489,14 +1495,31 @@ class AppState extends ChangeNotifier {
   /// Update device from API response
   void updateDeviceFromApi(String deviceId, Map<String, dynamic> data) {
     try {
+      final deviceExisted = _devices.containsKey(deviceId);
+      final deviceCountBefore = _devices.length;
+      
       final device = DeviceData.fromJson(data);
       _devices[deviceId] = device;
+      
+      // Resurrect device if it was locally deleted
+      if (_deletedDevices.contains(deviceId)) {
+        print('♻️ Resurrecting locally deleted device: $deviceId');
+        _deletedDevices.remove(deviceId);
+      }
+      
+      final deviceCountAfter = _devices.length;
       
       // Note: We don't broadcast here anymore because HTTP sync is meant to be a fetch,
       // and local changes already broadcast themselves.
       
       notifyListeners();
-      print('✅ Updated device $deviceId from API');
+      
+      if (deviceExisted) {
+        print('✅ Updated device $deviceId from API (already existed)');
+      } else {
+        print('✅ ADDED NEW device $deviceId from API (devices: $deviceCountBefore → $deviceCountAfter)');
+        print('   📋 All devices now: ${_devices.keys.join(", ")}');
+      }
     } catch (e) {
       print('❌ Error updating device from API: $e');
     }
@@ -1641,6 +1664,12 @@ class AppState extends ChangeNotifier {
     final device = _devices[deviceId] ?? DeviceData(name: deviceId);
     if (!_devices.containsKey(deviceId)) {
         _devices[deviceId] = device;
+    }
+    
+    // Resurrect device if it was locally deleted
+    if (_deletedDevices.contains(deviceId)) {
+      print('♻️ Resurrecting locally deleted device (socket): $deviceId');
+      _deletedDevices.remove(deviceId);
     }
     
     // Update local state directly

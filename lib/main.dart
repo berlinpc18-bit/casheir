@@ -253,6 +253,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     } finally {
       if (mounted) {
         setState(() => _isSyncing = false);
+        // Force a full rebuild to ensure new devices appear
+        setState(() {});
       }
     }
   }
