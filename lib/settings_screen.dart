@@ -214,6 +214,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 24),
+
+            // إعدادات خادم API
+            _buildApiServerSection(),
+            const SizedBox(height: 24),
+
+            /*
             // إعدادات الأسعار
             _buildPricesSection(),
             const SizedBox(height: 24),
@@ -254,10 +260,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildSoundSection(),
             const SizedBox(height: 24),
             
-            // إعدادات خادم API
-            _buildApiServerSection(),
-            const SizedBox(height: 24),
-            
             // معلومات الترخيص
             _buildLicenseSection(),
             const SizedBox(height: 24),
@@ -293,6 +295,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             // حول التطبيق
             _buildAboutSection(),
+            */
           ],
         ),
       ),

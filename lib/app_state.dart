@@ -9,9 +9,11 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'printer_service.dart';
 import 'api_sync_manager.dart'; // Add import
+import 'package:uuid/uuid.dart';
 import 'websocket_manager.dart';
 
 class OrderItem {
+  String id;
   String name;
   double price;
   int quantity;
@@ -20,15 +22,17 @@ class OrderItem {
   String? notes;
 
   OrderItem({
+    String? id,
     required this.name,
     required this.price,
     required this.quantity,
     required this.firstOrderTime,
     required this.lastOrderTime,
     this.notes,
-  });
+  }) : id = id ?? const Uuid().v4();
 
   Map<String, dynamic> toJson() => {
+        'id': id,
         'name': name,
         'price': price,
         'quantity': quantity,
@@ -39,6 +43,7 @@ class OrderItem {
       };
 
   factory OrderItem.fromJson(Map<String, dynamic> json) => OrderItem(
+        id: json['id']?.toString(), // Use existing ID if available
         name: json['name']?.toString() ?? 'Error',
         price: (json['price'] as num?)?.toDouble() ?? 0.0,
         quantity: (json['quantity'] as num?)?.toInt() ?? 1,
@@ -1080,11 +1085,16 @@ class AppState extends ChangeNotifier {
     }
     
     if (actuallyAdded.isNotEmpty) {
+      // STOP SENDING VIA SOCKET HERE!
+      // Server now handles broadcasting automatically upon HTTP request.
+      // Sending this causes double-processing/duplication on the server.
+      /*
       WebSocketManager().sendMessage({
         'type': 'order_placed',
         'deviceId': deviceName,
         'orders': actuallyAdded.map((o) => o.toJson()).toList(),
       });
+      */
     }
     
     notifyListeners();
@@ -1709,20 +1719,43 @@ class AppState extends ChangeNotifier {
     final device = _devices[deviceId]!;
     
     for (var newOrder in newOrders) {
-        // Truncate incoming time for comparison
-        final newOrderTime = newOrder.firstOrderTime.toIso8601String().split('.')[0];
+        // 1. Check EXACT match by ID 
+        final idExists = device.orders.any((o) => o.id == newOrder.id);
         
-        // Prevent duplicates by checking name and second-precision timestamp
-        final exists = device.orders.any((o) => 
-            o.name == newOrder.name && 
-            o.firstOrderTime.toIso8601String().split('.')[0] == newOrderTime
+        if (idExists) {
+             print('⏩ Skipped duplicate/echo order from socket (ID Match)');
+             continue; 
+        }
+
+        // 2. Check Logic for Merging (Fuzzy Name Match)
+        // Normalize names: Trim spaces and lowercase to ensure "Tea " matches "Tea"
+        final existingIndex = device.orders.indexWhere((o) => 
+            o.name.trim().toLowerCase() == newOrder.name.trim().toLowerCase()
         );
         
-        if (!exists) {
-            device.orders.add(newOrder);
-            print('💡 Added new order item from socket: ${newOrder.name}');
+        if (existingIndex >= 0) {
+            final existing = device.orders[existingIndex];
+            
+            // Robust Echo Detection:
+            // If the local item was updated very recently (< 10 seconds), 
+            // and the incoming item has no ID (or ID mismatch), assumes it's an echo of our own action.
+            final secondsSinceLastUpdate = DateTime.now().difference(existing.lastOrderTime).inSeconds.abs();
+            
+            print('🔍 Checking Duplicate/Echo for ${newOrder.name}:');
+            print('   - ID Match: ${existing.id == newOrder.id}');
+            print('   - Updated locally: ${secondsSinceLastUpdate}s ago');
+
+            if (secondsSinceLastUpdate < 10) {
+                 print('⏩ Skipped echo (Recently updated locally): ${newOrder.name}');
+            } else {
+                 print('➕ Merging new order quantity from socket: ${newOrder.name} (ID: ${newOrder.id})');
+                 existing.quantity += newOrder.quantity;
+                 existing.lastOrderTime = DateTime.now();
+            }
         } else {
-            print('⏩ Skipped duplicate order item from socket: ${newOrder.name}');
+            // New item -> Add it
+            device.orders.add(newOrder);
+            print('💡 Added new order item from socket: ${newOrder.name} (ID: ${newOrder.id})');
         }
     }
     notifyListeners();
