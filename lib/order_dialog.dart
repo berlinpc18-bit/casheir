@@ -175,15 +175,6 @@ class _OrderDialogState extends State<OrderDialog>
       ]);
     } catch (e) {
       print('Error syncing prices and categories: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('⚠️ خطأ في تحميل الأسعار والأقسام من الخادم'),
-            backgroundColor: Colors.red.withOpacity(0.7),
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
     }
   }
 

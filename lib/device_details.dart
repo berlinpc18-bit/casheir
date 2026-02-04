@@ -967,21 +967,12 @@ class _OrdersTabState extends State<OrdersTab> {
                     );
                     
                     // Show success message
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('تم إضافة الطلب بنجاح عبر API')),
-                      );
-                    }
+                    // Show success message
+                    print('✅ Order placed via API successfully');
                   } catch (e) {
                     // Fallback to local save if API fails
                     print('API failed, using local save: $e');
                     appState.addOrders(widget.deviceName, result);
-                    
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('تم إضافة الطلب بنجاح (محلي)')),
-                      );
-                    }
                   }
                 }
               },

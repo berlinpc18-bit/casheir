@@ -43,25 +43,6 @@ class _PricesSettingsScreenState extends State<PricesSettingsScreen> with Single
       await apiSync.syncPrices(appState);
     } catch (e) {
       print('Error syncing prices: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('⚠️ خطأ في تحميل الأسعار من الخادم - استخدام البيانات المحلية'),
-            backgroundColor: Colors.red.withOpacity(0.7),
-            duration: const Duration(seconds: 4),
-            action: SnackBarAction(
-              label: 'إعادة محاولة',
-              onPressed: () {
-                _syncPricesFromApi().then((_) {
-                  _initializeAllControllers();
-                  _loadCurrentPrices();
-                });
-              },
-              textColor: Colors.amber,
-            ),
-          ),
-        );
-      }
     }
   }
 

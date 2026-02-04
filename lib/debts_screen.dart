@@ -39,20 +39,6 @@ class _DebtsScreenState extends State<DebtsScreen> {
       await apiSync.syncDebts(appState);
     } catch (e) {
       print('Error syncing debts: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('⚠️ خطأ في تحميل البيانات من الخادم - استخدام البيانات المحلية'),
-            backgroundColor: Colors.red.withOpacity(0.7),
-            duration: const Duration(seconds: 4),
-            action: SnackBarAction(
-              label: 'إعادة محاولة',
-              onPressed: _syncDebtsFromApi,
-              textColor: Colors.amber,
-            ),
-          ),
-        );
-      }
     }
   }
 

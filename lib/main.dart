@@ -222,23 +222,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         print('✅ API Server is available, syncing all data...');
         await apiSync.syncAll(appState);
         print('✅ Full API sync completed successfully');
-        
-        // Show success message
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Row(
-                children: [
-                  Icon(Icons.check_circle, color: Colors.white),
-                  SizedBox(width: 12),
-                  Text('بيانات محدثة من السيرفر'),
-                ],
-              ),
-              backgroundColor: Colors.green.withOpacity(0.8),
-              duration: const Duration(seconds: 2),
-            ),
-          );
-        }
       } else {
         print('⚠️ API Server not available');
         if (mounted) {
