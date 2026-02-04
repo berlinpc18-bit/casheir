@@ -381,6 +381,154 @@ class ApiClient {
       throw ApiException('Error syncing orders: $e');
     }
   }
+  // --- New Endpoints Implementation matching SERVER_ENDPOINTS_SPEC.md ---
+
+  /// Get global settings and prices
+  /// GET /api/settings
+  Future<Map<String, dynamic>> getSettings() async {
+    return _get('/api/settings');
+  }
+
+  /// Update prices
+  /// PUT /api/settings/prices
+  Future<void> updatePrices(Map<String, dynamic> prices) async {
+    await _put('/api/settings/prices', prices);
+  }
+
+  /// Get printer settings
+  /// GET /api/settings/printers
+  Future<Map<String, dynamic>> getPrinters() async {
+    return _get('/api/settings/printers');
+  }
+
+  /// Update printer settings
+  /// PUT /api/settings/printers
+  Future<void> updatePrinters(Map<String, dynamic> settings) async {
+    await _put('/api/settings/printers', settings);
+  }
+
+  /// Get all products (Menu)
+  /// GET /api/products
+  Future<Map<String, dynamic>> getProducts() async {
+    return _get('/api/products');
+  }
+
+  /// Add a new product
+  /// POST /api/products
+  Future<void> addProduct(Map<String, dynamic> productData) async {
+    await _post('/api/products', productData);
+  }
+
+  /// Update a product
+  /// PUT /api/products/{id}
+  Future<void> updateProduct(String id, Map<String, dynamic> productData) async {
+    await _put('/api/products/$id', productData);
+  }
+
+  /// Delete a product
+  /// DELETE /api/products/{id}
+  Future<void> deleteProduct(String id) async {
+    await _delete('/api/products/$id');
+  }
+
+  /// Add a new device
+  /// POST /api/devices
+  Future<void> addDevice(Map<String, dynamic> deviceData) async {
+    await _post('/api/devices', deviceData);
+  }
+
+  /// Delete a device
+  /// DELETE /api/devices/{id}
+  Future<void> deleteDevice(String id) async {
+    await _delete('/api/devices/$id');
+  }
+
+  /// Add an expense
+  /// POST /api/financials/expenses
+  Future<void> addExpense(Map<String, dynamic> expenseData) async {
+    await _post('/api/financials/expenses', expenseData);
+  }
+
+  /// Add a new debt
+  /// POST /api/debts
+  Future<void> addDebt(Map<String, dynamic> debtData) async {
+    await _post('/api/debts', debtData);
+  }
+
+  /// Update/Settle a debt
+  /// PUT /api/debts/{id}
+  Future<void> updateDebt(String id, Map<String, dynamic> debtData) async {
+    await _put('/api/debts/$id', debtData);
+  }
+
+  // --- Helper Methods ---
+
+  Future<Map<String, dynamic>> _get(String endpoint) async {
+    try {
+      final response = await _httpClient.get(Uri.parse('$baseUrl$endpoint'))
+          .timeout(const Duration(seconds: 10));
+      return _processResponse(response);
+    } catch (e) {
+      throw ApiException('GET $endpoint failed: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> _post(String endpoint, Map<String, dynamic> data) async {
+    try {
+      final response = await _httpClient.post(
+        Uri.parse('$baseUrl$endpoint'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
+      ).timeout(const Duration(seconds: 10));
+      return _processResponse(response);
+    } catch (e) {
+      throw ApiException('POST $endpoint failed: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> _put(String endpoint, Map<String, dynamic> data) async {
+    try {
+      final url = Uri.parse('$baseUrl$endpoint');
+      final body = jsonEncode(data);
+      AppLogger().info('PUT Request to $url', 'API');
+      AppLogger().info('PUT Body: $body', 'API');
+      
+      final response = await _httpClient.put(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: body,
+      ).timeout(const Duration(seconds: 10));
+      
+      AppLogger().info('PUT Response: ${response.statusCode}', 'API');
+      if (response.statusCode >= 400) {
+        AppLogger().error('PUT Error Body: ${response.body}', 'API');
+      }
+      
+      return _processResponse(response);
+    } catch (e) {
+      throw ApiException('PUT $endpoint failed: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> _delete(String endpoint) async {
+    try {
+      final response = await _httpClient.delete(Uri.parse('$baseUrl$endpoint'))
+          .timeout(const Duration(seconds: 10));
+      return _processResponse(response);
+    } catch (e) {
+      throw ApiException('DELETE $endpoint failed: $e');
+    }
+  }
+
+  Map<String, dynamic> _processResponse(http.Response response) {
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      if (response.body.isEmpty) return {};
+      final decoded = jsonDecode(response.body);
+      return decoded is Map<String, dynamic> ? decoded : {'data': decoded};
+    } else {
+      throw ApiException('Request failed with status: ${response.statusCode}');
+    }
+  }
 }
 
 /// Custom exception for API errors

@@ -219,7 +219,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildApiServerSection(),
             const SizedBox(height: 24),
 
-            /*
             // إعدادات الأسعار
             _buildPricesSection(),
             const SizedBox(height: 24),
@@ -295,7 +294,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             // حول التطبيق
             _buildAboutSection(),
-            */
           ],
         ),
       ),

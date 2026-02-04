@@ -55,10 +55,13 @@ class ApiSyncManager {
             appState.updateDeviceFromApi(deviceId, deviceData);
             
             // Also fetch orders for this device
+            // Also fetch orders for this device
             try {
               final orders = await _apiClient.getDeviceOrders(deviceId);
-              appState.updateDeviceOrdersFromApi(deviceId, orders);
-              print('      ✅ Synced orders for $deviceId');
+              // Use device Name for local update (because AppState uses Name as Key)
+              final deviceName = deviceData['name'] ?? deviceId;
+              appState.updateDeviceOrdersFromApi(deviceName, orders);
+              print('      ✅ Synced orders for $deviceName (ID: $deviceId)');
             } catch (e) {
               print('      ⚠️ Could not sync orders for $deviceId: $e');
             }
@@ -117,13 +120,17 @@ class ApiSyncManager {
   }
   
   /// Sync device orders from API
-  Future<void> syncDeviceOrders(AppState appState, String deviceId) async {
+  Future<void> syncDeviceOrders(AppState appState, String deviceId, {String? deviceName}) async {
     if (!_useApi) return;
     
     try {
       final orders = await _apiClient.getDeviceOrders(deviceId);
-      appState.updateDeviceOrdersFromApi(deviceId, orders);
-      print('✅ Synced orders for $deviceId from API');
+      // If name not provided, we might have an issue if deviceId differs from name.
+      // But usually this is called with deviceId matching local key if using Name as ID on server?
+      // Or we can lookup name from appState if we have the ID mapping?
+      // For now, assume deviceName is passed or deviceId is used (if server uses names as IDs)
+      appState.updateDeviceOrdersFromApi(deviceName ?? deviceId, orders);
+      print('✅ Synced orders for ${deviceName ?? deviceId} from API');
     } catch (e) {
       print('❌ Error syncing orders for $deviceId: $e');
     }
@@ -311,6 +318,128 @@ class ApiSyncManager {
     } catch (e) {
       print('❌ Error transferring device on server: $e');
       rethrow; // Rethrow to let caller handle the error
+    }
+  }
+
+  /// --- Settings & Management Sync Methods ---
+
+  /// Update prices on server
+  Future<void> updatePricesOnServer(Map<String, dynamic> prices) async {
+    if (!_useApi) return;
+    try {
+      await _apiClient.updatePrices(prices);
+      print('✅ Prices updated on server');
+    } catch (e) {
+      print('❌ Error updating prices on server: $e');
+      rethrow;
+    }
+  }
+
+  /// Update printer settings on server
+  Future<void> updatePrintersOnServer(Map<String, dynamic> settings) async {
+    if (!_useApi) return;
+    try {
+      await _apiClient.updatePrinters(settings);
+      print('✅ Printer settings updated on server');
+    } catch (e) {
+      print('❌ Error updating printer settings on server: $e');
+      rethrow;
+    }
+  }
+
+  /// Add product to server
+  Future<void> addProductToServer(Map<String, dynamic> productData) async {
+    if (!_useApi) return;
+    try {
+      await _apiClient.addProduct(productData);
+      print('✅ Product added to server');
+    } catch (e) {
+      print('❌ Error adding product to server: $e');
+      rethrow;
+    }
+  }
+
+  /// Update product on server
+  Future<void> updateProductOnServer(String id, Map<String, dynamic> productData) async {
+    if (!_useApi) return;
+    try {
+      await _apiClient.updateProduct(id, productData);
+      print('✅ Product updated on server');
+    } catch (e) {
+      print('❌ Error updating product on server: $e');
+      rethrow;
+    }
+  }
+
+  /// Delete product from server
+  Future<void> deleteProductFromServer(String id) async {
+    if (!_useApi) return;
+    try {
+      await _apiClient.deleteProduct(id);
+      print('✅ Product deleted from server');
+    } catch (e) {
+      print('❌ Error deleting product from server: $e');
+      rethrow;
+    }
+  }
+
+  /// Add device to server
+  Future<void> addDeviceToServer(Map<String, dynamic> deviceData) async {
+    if (!_useApi) return;
+    try {
+      await _apiClient.addDevice(deviceData);
+      print('✅ Device added to server');
+    } catch (e) {
+      print('❌ Error adding device to server: $e');
+      rethrow;
+    }
+  }
+
+  /// Delete device from server
+  Future<void> deleteDeviceFromServer(String id) async {
+    if (!_useApi) return;
+    try {
+      await _apiClient.deleteDevice(id);
+      print('✅ Device deleted from server');
+    } catch (e) {
+      print('❌ Error deleting device from server: $e');
+      rethrow;
+    }
+  }
+
+  /// Add expense to server
+  Future<void> addExpenseToServer(Map<String, dynamic> expenseData) async {
+    if (!_useApi) return;
+    try {
+      await _apiClient.addExpense(expenseData);
+      print('✅ Expense added to server');
+    } catch (e) {
+      print('❌ Error adding expense to server: $e');
+      rethrow;
+    }
+  }
+
+  /// Add debt to server
+  Future<void> addDebtToServer(Map<String, dynamic> debtData) async {
+    if (!_useApi) return;
+    try {
+      await _apiClient.addDebt(debtData);
+      print('✅ Debt added to server');
+    } catch (e) {
+      print('❌ Error adding debt to server: $e');
+      rethrow;
+    }
+  }
+
+  /// Update debt on server
+  Future<void> updateDebtOnServer(String id, Map<String, dynamic> debtData) async {
+    if (!_useApi) return;
+    try {
+      await _apiClient.updateDebt(id, debtData);
+      print('✅ Debt updated on server');
+    } catch (e) {
+      print('❌ Error updating debt on server: $e');
+      rethrow;
     }
   }
 

@@ -11,6 +11,7 @@ import 'printer_service.dart';
 import 'api_sync_manager.dart'; // Add import
 import 'package:uuid/uuid.dart';
 import 'websocket_manager.dart';
+import 'api_sync_manager.dart';
 
 class OrderItem {
   String id;
@@ -319,18 +320,25 @@ class AppState extends ChangeNotifier {
     _orderPrices[itemName] = price;
     _saveToPrefs();
     notifyListeners();
+    // Sync to server
+    ApiSyncManager().updatePricesOnServer({'orderPrices': {itemName: price}});
   }
   
   void updateOrderPrices(Map<String, double> prices) {
     _orderPrices.addAll(prices);
     _saveToPrefs();
     notifyListeners();
+    // Sync to server
+    ApiSyncManager().updatePricesOnServer({'orderPrices': prices});
   }
   
   void removeOrderItem(String itemName) {
     _orderPrices.remove(itemName);
     _saveToPrefs();
     notifyListeners();
+    // Sync removal (sending price 0 or special flag might be needed, or full sync)
+    // Server spec didn't specify removal, assuming full sync handles it or price 0
+    ApiSyncManager().updatePricesOnServer({'orderPrices': {itemName: 0.0}}); 
   }
   
   // دوال إدارة الديون
@@ -341,13 +349,16 @@ class AppState extends ChangeNotifier {
   }
   
   void addDebt(String name, double amount) {
-    _debts.add({
+    final debt = {
       'name': name,
       'amount': amount,
       'date': DateTime.now().toIso8601String(),
-    });
+    };
+    _debts.add(debt);
     _saveToPrefs();
     notifyListeners();
+    // Sync to server
+    ApiSyncManager().addDebtToServer(debt);
   }
   
   void updateDebt(int index, String name, double amount) {
@@ -428,6 +439,8 @@ class AppState extends ChangeNotifier {
     _todayExpenses.add(expense);
     _saveToPrefs();
     notifyListeners();
+    // Sync to server
+    ApiSyncManager().addExpenseToServer(expense);
   }
 
   void removeExpense(dynamic item) {
@@ -555,6 +568,14 @@ class AppState extends ChangeNotifier {
     _emergencySave();
     notifyListeners();
     
+    // Sync to server
+    ApiSyncManager().addProductToServer({
+      'name': itemName, 
+      'category': categoryName, 
+      'price': price,
+      'description': 'Added via App'
+    });
+    
     print('✅ تم حفظ العنصر: $itemName بسعر: $price');
   }
   
@@ -568,6 +589,9 @@ class AppState extends ChangeNotifier {
     _saveToPrefs();
     _emergencySave();
     notifyListeners();
+    
+    // Sync to server
+    ApiSyncManager().deleteProductFromServer(itemName);
     
     print('✅ تم حذف وحفظ العنصر: $itemName');
   }
@@ -609,6 +633,8 @@ class AppState extends ChangeNotifier {
     _pcPrice = price;
     notifyListeners();
     _saveToPrefs();
+    // Sync to server
+    ApiSyncManager().updatePricesOnServer({'pc_price_default': price});
   }
 
   // تحديث سعر جهاز PS4 محدد
@@ -617,6 +643,14 @@ class AppState extends ChangeNotifier {
       _ps4Prices[deviceName]![mode] = price;
       notifyListeners();
       _saveToPrefs();
+      // Sync to server (partial update)
+      // We need to send both modes if possible, but here we only have one updated.
+      // Ideally we send the full object for this device.
+      ApiSyncManager().updatePricesOnServer({
+        'ps4_prices': {
+           deviceName: _ps4Prices[deviceName]
+        }
+      });
     }
   }
   
@@ -629,6 +663,12 @@ class AppState extends ChangeNotifier {
     _ps4Prices[deviceName]!['multi'] = multiPrice;
     notifyListeners();
     _saveToPrefs();
+    // Sync to server
+    ApiSyncManager().updatePricesOnServer({
+      'ps4_prices': {
+         deviceName: {'single': singlePrice, 'multi': multiPrice}
+      }
+    });
   }
   
   // تحديث سعر جهاز PC فردي
@@ -636,6 +676,10 @@ class AppState extends ChangeNotifier {
     _pcPrices[deviceName] = price;
     notifyListeners();
     _saveToPrefs();
+    // Sync to server
+    ApiSyncManager().updatePricesOnServer({
+      'pc_prices_individual': { deviceName: price }
+    });
   }
   
   // تحديث سعر طاولة فردية
@@ -643,6 +687,10 @@ class AppState extends ChangeNotifier {
     _tablePrices[deviceName] = price;
     notifyListeners();
     _saveToPrefs();
+    // Sync to server
+    ApiSyncManager().updatePricesOnServer({
+      'table_prices': { deviceName: price }
+    });
   }
   
   // تحديث سعر طاولة بيليارد فردية
@@ -650,6 +698,10 @@ class AppState extends ChangeNotifier {
     _billiardPrices[deviceName] = price;
     notifyListeners();
     _saveToPrefs();
+    // Sync to server
+    ApiSyncManager().updatePricesOnServer({
+      'billiard_prices': { deviceName: price }
+    });
   }
 
   // إدارة الأجهزة
@@ -692,6 +744,12 @@ class AppState extends ChangeNotifier {
     // تأخير أطول لتجنب التضارب
     await Future.delayed(const Duration(milliseconds: 500));
     await _saveToPrefs();
+    
+    // Sync to server
+    // User requested same Hive schema, so we send the full object structure
+    await ApiSyncManager().addDeviceToServer(
+      DeviceData(name: deviceName).toJson() // Send full object
+    );
     
     print('=== addDevice completed for: $deviceName ===');
   }
@@ -741,6 +799,10 @@ class AppState extends ChangeNotifier {
       'deviceId': deviceName,
       'timestamp': DateTime.now().toIso8601String(),
     });
+    
+    // Sync to server
+    await ApiSyncManager().deleteDeviceFromServer(deviceName);
+
 
     print('=== removeDevice finished for: $deviceName ===');
   }
@@ -782,6 +844,14 @@ class AppState extends ChangeNotifier {
     // تأخير صغير لتجنب التضارب
     await Future.delayed(const Duration(milliseconds: 100));
     await _saveToPrefs();
+    
+    // Sync to server: Delete old, Add new (since name is ID)
+    await ApiSyncManager().deleteDeviceFromServer(oldName);
+    await ApiSyncManager().addDeviceToServer({
+      'name': newName,
+      'type': 'Unknown', // Need to infer type if possible or pass it
+      'ip_address': '127.0.0.1'
+    });
   }
   
   // دالة للترتيب الطبيعي للأسماء مع الأرقام
@@ -1479,6 +1549,8 @@ class AppState extends ChangeNotifier {
     return price;
   }
 
+
+
   // safeCloseBox removed - server-only mode
 
   @override
@@ -1509,12 +1581,14 @@ class AppState extends ChangeNotifier {
       final deviceCountBefore = _devices.length;
       
       final device = DeviceData.fromJson(data);
-      _devices[deviceId] = device;
+      // ALWAYS use device.name as key locally to match Hive schema behavior
+      final localKey = device.name;
+      _devices[localKey] = device;
       
       // Resurrect device if it was locally deleted
-      if (_deletedDevices.contains(deviceId)) {
-        print('♻️ Resurrecting locally deleted device: $deviceId');
-        _deletedDevices.remove(deviceId);
+      if (_deletedDevices.contains(localKey)) {
+        print('♻️ Resurrecting locally deleted device: $localKey');
+        _deletedDevices.remove(localKey);
       }
       
       final deviceCountAfter = _devices.length;
@@ -1536,19 +1610,21 @@ class AppState extends ChangeNotifier {
   }
 
   /// Update device orders from API response
-  void updateDeviceOrdersFromApi(String deviceId, List<dynamic> ordersData) {
+  /// Update device orders from API response (using Device Name as ID locally)
+  void updateDeviceOrdersFromApi(String deviceName, List<dynamic> ordersData) {
     try {
-      if (_devices.containsKey(deviceId)) {
+      // Use deviceName as key (it IS the key in our local schema)
+      if (_devices.containsKey(deviceName)) {
         final orders = ordersData
             .whereType<Map<String, dynamic>>()
             .map((e) => OrderItem.fromJson(e))
             .toList();
-        _devices[deviceId]!.orders = orders;
+        _devices[deviceName]!.orders = orders;
 
         // Note: No broadcast here either to avoid additive duplication on other clients
         
         notifyListeners();
-        print('✅ Updated orders for $deviceId from API');
+        print('✅ Updated orders for $deviceName from API');
       }
     } catch (e) {
       print('❌ Error updating orders from API: $e');
@@ -1570,33 +1646,45 @@ class AppState extends ChangeNotifier {
   }
 
   /// Update prices from API response
+  /// Update prices from API response
   void updatePricesFromApi(Map<String, dynamic> pricesData) {
     try {
-      _pcPrice = (pricesData['pcPrice'] ?? 1500).toDouble();
+      // Handle both camelCase (PUT response) and snake_case (GET response)
+      _pcPrice = (pricesData['pcPrice'] ?? pricesData['pc_price_default'] ?? 1500).toDouble();
       
-      if (pricesData['ps4Prices'] != null) {
+      final ps4Data = pricesData['ps4Prices'] ?? pricesData['ps4_prices'];
+      if (ps4Data != null) {
         _ps4Prices.clear();
-        final Map<String, dynamic> savedPs4Prices = Map<String, dynamic>.from(pricesData['ps4Prices']);
+        final Map<String, dynamic> savedPs4Prices = Map<String, dynamic>.from(ps4Data);
         savedPs4Prices.forEach((deviceName, prices) {
           _ps4Prices[deviceName] = Map<String, double>.from(prices);
         });
       }
       
-      if (pricesData['pcPrices'] != null) {
-        _pcPrices = Map<String, double>.from(pricesData['pcPrices']);
+      final pcData = pricesData['pcPrices'] ?? pricesData['pc_prices_individual'] ?? pricesData['pc_prices'];
+      if (pcData != null) {
+        _pcPrices = Map<String, double>.from(pcData);
       }
       
-      if (pricesData['tablePrices'] != null) {
-        _tablePrices = Map<String, double>.from(pricesData['tablePrices']);
+      final tableData = pricesData['tablePrices'] ?? pricesData['table_prices'];
+      if (tableData != null) {
+        _tablePrices = Map<String, double>.from(tableData);
       }
       
-      if (pricesData['billiardPrices'] != null) {
-        _billiardPrices = Map<String, double>.from(pricesData['billiardPrices']);
+      final billiardData = pricesData['billiardPrices'] ?? pricesData['billiard_prices'] ?? pricesData['billiard_price'];
+      if (billiardData != null) {
+        if (billiardData is Map) {
+             _billiardPrices = Map<String, double>.from(billiardData);
+        } else if (billiardData is num) {
+             // Handle simple global price if needed, but we store per device
+             // Only if map structure matches expectations.
+        }
       }
       
       // Fix: Sync product prices (orderPrices)
-      if (pricesData['orderPrices'] != null) {
-        _orderPrices = Map<String, double>.from(pricesData['orderPrices']);
+      final orderData = pricesData['orderPrices'] ?? pricesData['order_prices'];
+      if (orderData != null) {
+        _orderPrices = Map<String, double>.from(orderData);
       }
       
       notifyListeners();
