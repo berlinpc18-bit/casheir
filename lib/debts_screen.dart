@@ -15,6 +15,8 @@ class _DebtsScreenState extends State<DebtsScreen> {
   late TextEditingController _amountController;
   late TextEditingController _editNameController;
   late TextEditingController _editAmountController;
+  late TextEditingController _notesController;
+  late TextEditingController _editNotesController;
 
   @override
   void initState() {
@@ -23,6 +25,8 @@ class _DebtsScreenState extends State<DebtsScreen> {
     _amountController = TextEditingController();
     _editNameController = TextEditingController();
     _editAmountController = TextEditingController();
+    _notesController = TextEditingController();
+    _editNotesController = TextEditingController();
     
     // Sync debts from API
     _syncDebtsFromApi();
@@ -58,6 +62,8 @@ class _DebtsScreenState extends State<DebtsScreen> {
     _amountController.dispose();
     _editNameController.dispose();
     _editAmountController.dispose();
+    _notesController.dispose();
+    _editNotesController.dispose();
     super.dispose();
   }
 
@@ -302,6 +308,14 @@ class _DebtsScreenState extends State<DebtsScreen> {
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
+                              if (debt['notes'] != null && debt['notes'].toString().isNotEmpty)
+                                Text(
+                                  debt['notes'],
+                                  style: TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 12,
+                                  ),
+                                ),
                               const SizedBox(height: 4),
                               Text(
                                 '${(debt['amount'] ?? 0).round()} دينار عراقي',
@@ -354,6 +368,7 @@ class _DebtsScreenState extends State<DebtsScreen> {
   void _showAddDebtDialog() {
     _nameController.clear();
     _amountController.clear();
+    _notesController.clear();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -402,6 +417,20 @@ class _DebtsScreenState extends State<DebtsScreen> {
                   focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.green)),
                 ),
               ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _notesController,
+                keyboardType: TextInputType.text,
+                enableInteractiveSelection: true,
+                style: TextStyle(
+                  color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black,
+                ),
+                decoration: InputDecoration(
+                  labelText: 'ملاحظات',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.green)),
+                ),
+              ),
               const SizedBox(height: 20),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -416,9 +445,10 @@ class _DebtsScreenState extends State<DebtsScreen> {
                     onPressed: () {
                       final name = _nameController.text.trim();
                       final amount = double.tryParse(_amountController.text) ?? 0.0;
+                      final notes = _notesController.text.trim();
                       if (name.isNotEmpty && amount > 0) {
                         final appState = Provider.of<AppState>(context, listen: false);
-                        appState.addDebt(name, amount);
+                        appState.addDebt(name, amount, notes: notes);
                         Navigator.of(context).pop();
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
@@ -452,6 +482,7 @@ class _DebtsScreenState extends State<DebtsScreen> {
   void _showEditDebtDialog(int index, Map<String, dynamic> debt) {
     _editNameController.text = debt['name'] ?? '';
     _editAmountController.text = (debt['amount'] ?? 0).toString();
+    _editNotesController.text = debt['notes'] ?? '';
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -499,6 +530,20 @@ class _DebtsScreenState extends State<DebtsScreen> {
                   focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.blue)),
                 ),
               ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _editNotesController,
+                keyboardType: TextInputType.text,
+                enableInteractiveSelection: true,
+                style: TextStyle(
+                  color: Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black,
+                ),
+                decoration: InputDecoration(
+                  labelText: 'ملاحظات',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.blue)),
+                ),
+              ),
               const SizedBox(height: 20),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -513,9 +558,10 @@ class _DebtsScreenState extends State<DebtsScreen> {
                     onPressed: () {
                       final name = _editNameController.text.trim();
                       final amount = double.tryParse(_editAmountController.text) ?? 0.0;
+                      final notes = _editNotesController.text.trim();
                       if (name.isNotEmpty && amount > 0) {
                         final appState = Provider.of<AppState>(context, listen: false);
-                        appState.updateDebt(index, name, amount);
+                        appState.updateDebt(index, name, amount, notes: notes);
                         Navigator.of(context).pop();
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(

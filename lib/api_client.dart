@@ -49,25 +49,7 @@ class ApiClient {
   /// Get all devices
   /// GET /api/devices
   Future<Map<String, dynamic>> getDevices() async {
-    try {
-      final response = await _httpClient.get(
-        Uri.parse('$baseUrl/api/devices'),
-      ).timeout(const Duration(seconds: 30));
-      
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body) as Map;
-        // Unwrap response wrapper { success, data, count, timestamp }
-        if (decoded.containsKey('data') && decoded['data'] is Map) {
-          return Map<String, dynamic>.from(decoded['data']);
-        }
-        return Map<String, dynamic>.from(decoded);
-      } else {
-        throw ApiException('Failed to get devices: ${response.statusCode}');
-      }
-    } catch (e) {
-      AppLogger().error('Error getting devices: $e', 'API');
-      throw ApiException('Error getting devices: $e');
-    }
+    return _get('/api/devices');
   }
   
   /// Get specific device by ID
@@ -138,24 +120,7 @@ class ApiClient {
   /// Get all prices
   /// GET /api/prices
   Future<Map<String, dynamic>> getPrices() async {
-    try {
-      final response = await _httpClient.get(
-        Uri.parse('$baseUrl/api/prices'),
-      ).timeout(const Duration(seconds: 30));
-      
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body) as Map;
-        // Unwrap response wrapper { success, data, count, timestamp }
-        if (decoded.containsKey('data') && decoded['data'] is Map) {
-          return Map<String, dynamic>.from(decoded['data']);
-        }
-        return Map<String, dynamic>.from(decoded);
-      } else {
-        throw ApiException('Failed to get prices: ${response.statusCode}');
-      }
-    } catch (e) {
-      throw ApiException('Error getting prices: $e');
-    }
+    return _get('/api/prices');
   }
   
   /// Get all categories
@@ -179,6 +144,29 @@ class ApiClient {
       }
     } catch (e) {
       throw ApiException('Error getting categories: $e');
+    }
+  }
+
+
+  /// Add a new category
+  /// POST /api/categories
+  Future<void> addCategory(String name) async {
+    try {
+      await _post('/api/categories', {'name': name});
+    } catch (e) {
+      throw ApiException('Error adding category: $e');
+    }
+  }
+
+  /// Delete a category
+  /// DELETE /api/categories/{name}
+  Future<void> deleteCategory(String name) async {
+    try {
+      // Encode name to handle spaces
+      final encodedName = Uri.encodeComponent(name);
+      await _delete('/api/categories/$encodedName');
+    } catch (e) {
+      throw ApiException('Error deleting category: $e');
     }
   }
   
@@ -409,6 +397,8 @@ class ApiClient {
 
   /// Get all products (Menu)
   /// GET /api/products
+  /// Get all products and categories hierarchy
+  /// GET /api/products
   Future<Map<String, dynamic>> getProducts() async {
     return _get('/api/products');
   }
@@ -475,8 +465,17 @@ class ApiClient {
 
   Future<Map<String, dynamic>> _post(String endpoint, Map<String, dynamic> data) async {
     try {
+      final String fullUrl;
+      if (endpoint.startsWith('/') && baseUrl.endsWith('/')) {
+        fullUrl = baseUrl + endpoint.substring(1);
+      } else if (!endpoint.startsWith('/') && !baseUrl.endsWith('/')) {
+        fullUrl = '$baseUrl/$endpoint';
+      } else {
+        fullUrl = '$baseUrl$endpoint';
+      }
+      
       final response = await _httpClient.post(
-        Uri.parse('$baseUrl$endpoint'),
+        Uri.parse(fullUrl),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(data),
       ).timeout(const Duration(seconds: 10));
@@ -488,22 +487,20 @@ class ApiClient {
 
   Future<Map<String, dynamic>> _put(String endpoint, Map<String, dynamic> data) async {
     try {
-      final url = Uri.parse('$baseUrl$endpoint');
-      final body = jsonEncode(data);
-      AppLogger().info('PUT Request to $url', 'API');
-      AppLogger().info('PUT Body: $body', 'API');
-      
-      final response = await _httpClient.put(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: body,
-      ).timeout(const Duration(seconds: 10));
-      
-      AppLogger().info('PUT Response: ${response.statusCode}', 'API');
-      if (response.statusCode >= 400) {
-        AppLogger().error('PUT Error Body: ${response.body}', 'API');
+      final String fullUrl;
+      if (endpoint.startsWith('/') && baseUrl.endsWith('/')) {
+        fullUrl = baseUrl + endpoint.substring(1);
+      } else if (!endpoint.startsWith('/') && !baseUrl.endsWith('/')) {
+        fullUrl = '$baseUrl/$endpoint';
+      } else {
+        fullUrl = '$baseUrl$endpoint';
       }
-      
+
+      final response = await _httpClient.put(
+        Uri.parse(fullUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
+      ).timeout(const Duration(seconds: 10));
       return _processResponse(response);
     } catch (e) {
       throw ApiException('PUT $endpoint failed: $e');
@@ -524,7 +521,15 @@ class ApiClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (response.body.isEmpty) return {};
       final decoded = jsonDecode(response.body);
-      return decoded is Map<String, dynamic> ? decoded : {'data': decoded};
+      
+      if (decoded is Map<String, dynamic>) {
+        // Automatically unwrap { success: true, data: { ... } } if present
+        if (decoded.containsKey('data') && decoded['data'] is Map) {
+          return Map<String, dynamic>.from(decoded['data']);
+        }
+        return decoded;
+      }
+      return {'data': decoded};
     } else {
       throw ApiException('Request failed with status: ${response.statusCode}');
     }

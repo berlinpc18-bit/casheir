@@ -167,18 +167,27 @@ class ApiSyncManager {
     }
   }
   
-  /// Sync categories from API ONLY (no Hive fallback)
+  /// Sync categories and products hierarchy from API
   Future<void> syncCategories(AppState appState) async {
     if (!_useApi) return;
     
     try {
-      final categories = await _apiClient.getCategories();
+      final response = await _apiClient.getProducts();
+      final List<dynamic> categories;
+      
+      if (response.containsKey('categories')) {
+          categories = response['categories'] as List<dynamic>;
+      } else {
+          // Fallback if the server returns a flat list (unlikely based on new spec)
+          categories = [];
+      }
+      
       appState.updateCategoriesFromApi(categories);
-      print('✅ Synced categories from SERVER');
+      print('✅ Synced hierarchical menu (products & categories) from SERVER');
       appState.notifyListeners();
     } catch (e) {
-      print('❌ Error syncing categories from SERVER: $e');
-      rethrow; // No Hive fallback
+      print('❌ Error syncing menu from SERVER: $e');
+      rethrow;
     }
   }
   
@@ -379,6 +388,30 @@ class ApiSyncManager {
       print('✅ Product deleted from server');
     } catch (e) {
       print('❌ Error deleting product from server: $e');
+      rethrow;
+    }
+  }
+
+  /// Add category to server
+  Future<void> addCategoryToServer(String name) async {
+    if (!_useApi) return;
+    try {
+      await _apiClient.addCategory(name);
+      print('✅ Category added to server');
+    } catch (e) {
+      print('❌ Error adding category to server: $e');
+      rethrow;
+    }
+  }
+
+  /// Delete category from server
+  Future<void> deleteCategoryFromServer(String name) async {
+    if (!_useApi) return;
+    try {
+      await _apiClient.deleteCategory(name);
+      print('✅ Category deleted from server');
+    } catch (e) {
+      print('❌ Error deleting category from server: $e');
       rethrow;
     }
   }

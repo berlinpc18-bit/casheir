@@ -953,24 +953,18 @@ class _OrdersTabState extends State<OrdersTab> {
                   final apiSync = ApiSyncManager();
                   
                   try {
-                    // Convert orders to JSON format for API
-                    final orderItems = result.map((order) => {
-                      'name': order.name,
-                      'price': order.price,
-                      'quantity': order.quantity,
-                      'notes': order.notes,
-                      'firstOrderTime': order.firstOrderTime.toIso8601String(),
-                      'lastOrderTime': order.lastOrderTime.toIso8601String(),
-                    }).toList();
+                    // Convert orders to JSON format for API (properly including IDs for echo detection)
+                    final orderItems = result.map((order) => order.toJson()).toList();
                     
-                    // Place order via API
+                    // 1. Add to local state and broadcast immediately (Optimistic UI)
+                    // API is already going to broadcast, but we update locally first to prevent race condition echoing
+                    appState.addOrdersWithoutApiSync(widget.deviceName, result);
+
+                    // 2. Place order via API
                     await apiSync.placeOrderViaApi(
                       widget.deviceName,
                       orderItems,
                     );
-                    
-                    // Add to local state and broadcast (API already has it, so skip API sync)
-                    appState.addOrdersWithoutApiSync(widget.deviceName, result);
                     
                     // Show success message
                     if (mounted) {

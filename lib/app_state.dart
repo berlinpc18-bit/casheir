@@ -348,36 +348,63 @@ class AppState extends ChangeNotifier {
     return _debts.fold(0.0, (sum, debt) => sum + (debt['amount'] ?? 0.0));
   }
   
-  void addDebt(String name, double amount) {
+  void addDebt(String name, double amount, {String notes = ''}) {
     final debt = {
       'name': name,
       'amount': amount,
       'date': DateTime.now().toIso8601String(),
+      'notes': notes,
     };
     _debts.add(debt);
     _saveToPrefs();
     notifyListeners();
-    // Sync to server
-    ApiSyncManager().addDebtToServer(debt);
+    
+    // Sync to server using expected field names
+    ApiSyncManager().addDebtToServer({
+      'customer_name': name,
+      'amount': amount,
+      'notes': notes,
+    });
   }
   
-  void updateDebt(int index, String name, double amount) {
+  void updateDebt(int index, String name, double amount, {String notes = 'Updated'}) {
     if (index >= 0 && index < _debts.length) {
+      final oldDebt = _debts[index];
+      final id = oldDebt['id'] ?? oldDebt['name'] ?? name;
+      
       _debts[index] = {
+        'id': id,
         'name': name,
         'amount': amount,
-        'date': _debts[index]['date'], // الاحتفاظ بتاريخ الإضافة الأصلي
+        'notes': notes,
+        'date': oldDebt['date'],
       };
+      
       _saveToPrefs();
       notifyListeners();
+      
+      // Sync to server
+      ApiSyncManager().updateDebtOnServer(id.toString(), {
+        'amount': amount,
+        'notes': notes,
+      });
     }
   }
   
   void removeDebt(int index) {
     if (index >= 0 && index < _debts.length) {
+      final debt = _debts[index];
+      final id = debt['id'] ?? debt['name'];
+      
       _debts.removeAt(index);
       _saveToPrefs();
       notifyListeners();
+      
+      // Settle debt on server by setting amount to 0
+      ApiSyncManager().updateDebtOnServer(id.toString(), {
+        'amount': 0.0,
+        'notes': 'Setted/Removed from App',
+      });
     }
   }
   
@@ -421,6 +448,9 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     
     print('✅ تم حفظ القسم الجديد: $categoryName');
+    
+    // Sync to server
+    ApiSyncManager().addCategoryToServer(categoryName);
   }
 
   // دوال إدارة المصروفات
@@ -604,6 +634,8 @@ class AppState extends ChangeNotifier {
     _customCategories.remove(categoryName);
     _saveToPrefs();
     notifyListeners();
+    // Sync to server
+    ApiSyncManager().deleteCategoryFromServer(categoryName);
   }
   
   void updateCategoryName(String oldName, String newName) {
@@ -1142,12 +1174,8 @@ class AppState extends ChangeNotifier {
         existing.quantity += newOrder.quantity;
         existing.lastOrderTime = DateTime.now();
         
-        WebSocketManager().sendMessage({
-          'type': 'order_updated',
-          'deviceId': deviceName,
-          'orderIndex': index,
-          'data': existing.toJson(),
-        });
+        // NO WebSocket message here! 
+        // Server handles broadcasting for HTTP actions to avoid duplication.
       } else {
         device.orders.add(newOrder);
         actuallyAdded.add(newOrder);
@@ -1694,25 +1722,40 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Update categories from API response
+  /// Update categories and product prices from API response hierarchy
   void updateCategoriesFromApi(List<dynamic> categoriesData) {
     try {
       print('🔄 updateCategoriesFromApi called with ${categoriesData.length} categories');
       _customCategories.clear();
+      
       for (var catData in categoriesData.whereType<Map<String, dynamic>>()) {
         final categoryName = catData['name'] as String?;
         if (categoryName != null) {
-          // Extract item names as List<String>
-          final items = (catData['items'] as List?)
-              ?.whereType<String>()
-              .toList() ?? [];
-          _customCategories[categoryName] = items;
-          print('  ✅ Category "$categoryName" loaded with ${items.length} items: $items');
+          final itemsList = catData['items'] as List?;
+          List<String> itemNames = [];
+          
+          if (itemsList != null) {
+              for (var item in itemsList) {
+                  if (item is String) {
+                      itemNames.add(item);
+                  } else if (item is Map<String, dynamic>) {
+                      // Extract name and price from nested product object
+                      final name = item['name'] as String?;
+                      final price = (item['price'] ?? 0.0).toDouble();
+                      if (name != null) {
+                          itemNames.add(name);
+                          _orderPrices[name] = price;
+                      }
+                  }
+              }
+          }
+          
+          _customCategories[categoryName] = itemNames;
+          print('  ✅ Category "$categoryName" loaded with ${itemNames.length} items');
         }
       }
       notifyListeners();
-      print('✅ Updated categories from API - Total: ${_customCategories.length} categories');
-      print('📋 All categories: ${_customCategories.keys.toList()}');
+      print('✅ Updated categories & menu items from API - Total: ${_customCategories.length} categories');
     } catch (e) {
       print('❌ Error updating categories from API: $e');
     }
@@ -1721,14 +1764,49 @@ class AppState extends ChangeNotifier {
   /// Update debts from API response
   void updateDebtsFromApi(Map<String, dynamic> debtsData) {
     try {
+      print('🔄 updateDebtsFromApi: Received data with keys: ${debtsData.keys.toList()}');
       _debts = [];
-      (debtsData['debts'] as List?)?.forEach((debtData) {
-        if (debtData is Map<String, dynamic>) {
-          _debts.add(debtData);
+      
+      // Attempt 1: Look for 'data' key (Map or List)
+      if (debtsData.containsKey('data')) {
+          final data = debtsData['data'];
+          if (data is Map) {
+              data.forEach((name, amount) {
+                  _debts.add({
+                      'name': name,
+                      'amount': (amount as num).toDouble(),
+                      'id': name,
+                      'date': DateTime.now().toIso8601String(),
+                  });
+              });
+          } else if (data is List) {
+              for (var d in data) {
+                  if (d is Map<String, dynamic>) _debts.add(Map<String, dynamic>.from(d));
+              }
+          }
+      } 
+      // Attempt 2: Look for 'debts' key
+      else if (debtsData.containsKey('debts') && debtsData['debts'] is List) {
+        for (var d in debtsData['debts']) {
+            if (d is Map<String, dynamic>) _debts.add(Map<String, dynamic>.from(d));
         }
-      });
+      }
+      // Attempt 3: Direct Name -> Amount mapping at the root
+      else {
+          debtsData.forEach((name, amount) {
+              if (amount is num && name != 'success' && name != 'status' && name != 'count' && name != 'totalDebt' && name != 'timestamp') {
+                  _debts.add({
+                      'name': name,
+                      'amount': amount.toDouble(),
+                      'id': name,
+                      'date': DateTime.now().toIso8601String(),
+                  });
+              }
+          });
+      }
+      
       notifyListeners();
-      print('✅ Updated debts from API');
+      print('✅ Updated debts - Count: ${_debts.length}');
     } catch (e) {
       print('❌ Error updating debts from API: $e');
     }
