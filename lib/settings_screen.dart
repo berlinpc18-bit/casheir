@@ -49,6 +49,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _printKitchenReceipts = true;
   bool _printBaristaReceipts = true;
   bool _printCashierReceipts = true;
+  String? _currentUser;
 
 
 
@@ -59,6 +60,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _apiServerController = TextEditingController(text: ApiClient().baseUrl);
     _soundEffects = SoundService().soundEnabled;
     _useApiData = ApiSyncManager().isApiEnabled; // Load current API setting
+    _loadCurrentUser();
+  }
+
+  Future<void> _loadCurrentUser() async {
+    final username = await AuthService().getLoggedInUsername();
+    if (mounted) {
+      setState(() {
+        _currentUser = username;
+      });
+    }
   }
 
 
@@ -215,85 +226,80 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 24),
 
+
             // إعدادات خادم API
             _buildApiServerSection(),
             const SizedBox(height: 24),
 
-            // إعدادات الأسعار
-            _buildPricesSection(),
-            const SizedBox(height: 24),
-            
-            // إعدادات الطابعات
-            _buildPrintersButtonSection(),
-            const SizedBox(height: 24),
-            
-            // إدارة الأجهزة
-            _buildDeviceManagementSection(),
-            const SizedBox(height: 24),
-            
-            // إدارة النسخ الاحتياطية
-            _buildBackupManagementSection(),
-            const SizedBox(height: 24),
-            
-            // تعديل أسعار الطلبات
-            _buildOrderPricesSection(),
-            const SizedBox(height: 24),
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              child: const Divider(
-                color: Colors.grey,
-                thickness: 0.5,
-              ),
-            ),
-            const SizedBox(height: 24),
-            
-            // التقارير المالية
-            _buildFinancialReportsSection(),
-            const SizedBox(height: 24),
-            
-            // إدارة الديون
-            _buildDebtsSection(),
-            const SizedBox(height: 24),
-            
-            // إعدادات الصوت
-            _buildSoundSection(),
-            const SizedBox(height: 24),
-            
-            // معلومات الترخيص
+            // معلومات الترخيص (تظهر للجميع)
             _buildLicenseSection(),
             const SizedBox(height: 24),
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              child: const Divider(
-                color: Colors.grey,
-                thickness: 0.5,
-              ),
-            ),
-            const SizedBox(height: 24),
-            
-            // سجل النظام
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.brown.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.history_edu, color: Colors.brown),
-              ),
-              title: const Text('سجل النظام (Debug Logs)'),
-              subtitle: const Text('عرض سجلات الأخطاء والعمليات'),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (context) => const LogViewerScreen()),
-                );
-              },
-            ),
-            const SizedBox(height: 24),
 
-            // حول التطبيق
-            _buildAboutSection(),
+            if (_currentUser == 'super_admin') ...[
+              // إعدادات الأسعار
+              _buildPricesSection(),
+              const SizedBox(height: 24),
+              
+              // إعدادات الطابعات
+              _buildPrintersButtonSection(),
+              const SizedBox(height: 24),
+              
+              // إدارة الأجهزة
+              _buildDeviceManagementSection(),
+              const SizedBox(height: 24),
+              
+              // إدارة النسخ الاحتياطية
+              _buildBackupManagementSection(),
+              const SizedBox(height: 24),
+              
+              // تعديل أسعار الطلبات
+              _buildOrderPricesSection(),
+              const SizedBox(height: 24),
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16),
+                child: const Divider(
+                  color: Colors.grey,
+                  thickness: 0.5,
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // التقارير المالية
+              _buildFinancialReportsSection(),
+              const SizedBox(height: 24),
+              
+              // إدارة الديون
+              _buildDebtsSection(),
+              const SizedBox(height: 24),
+              
+              // إعدادات الصوت
+              _buildSoundSection(),
+              const SizedBox(height: 24),
+              
+              // سجل النظام
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.brown.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.history_edu, color: Colors.brown),
+                ),
+                title: const Text('سجل النظام (Debug Logs)'),
+                subtitle: const Text('عرض سجلات الأخطاء والعمليات'),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (context) => const LogViewerScreen()),
+                  );
+                },
+              ),
+              const SizedBox(height: 24),
+
+              // حول التطبيق
+              _buildAboutSection(),
+            ],
           ],
         ),
       ),

@@ -8,12 +8,14 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
+
 import 'package:window_manager/window_manager.dart';
 
 import 'app_state.dart';
 import 'device_grid.dart';
 import 'settings_screen.dart';
 import 'login_screen.dart';
+import 'auth_service.dart';
 import 'order_dialog.dart';
 import 'sound_service.dart';
 import 'license_manager.dart';
@@ -182,17 +184,23 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
+
   late TabController _tabController;
   int _currentIndex = 0;
   bool _isFullScreen = false;
   bool _isTogglingFullScreen = false;
   bool _isSyncing = false;
   final FocusNode _focusNode = FocusNode();
+  String? _currentUser;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
+    
+    // Get current user
+    _loadCurrentUser();
+
     _tabController.addListener(() {
       setState(() {
         _currentIndex = _tabController.index;
@@ -210,6 +218,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     
     // 🔍 Auto-Discovery for Server (Disabled per user request to stop auto-connect issues)
     // _setupServerDiscovery();
+  }
+
+
+  Future<void> _loadCurrentUser() async {
+    final username = await AuthService().getLoggedInUsername();
+    if (mounted) {
+      setState(() {
+        _currentUser = username;
+      });
+    }
   }
 
   void _setupServerDiscovery() {
@@ -813,63 +831,66 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ),
             ),
           ),
-          const SizedBox(width: 12),
-          // زر الشاشة الكاملة
-          Tooltip(
-            message: _isFullScreen ? 'الخروج من الشاشة الكاملة (F11)' : 'الشاشة الكاملة (F11)',
-            child: InkWell(
-              onTap: _toggleFullScreen,
-              borderRadius: BorderRadius.circular(12),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  gradient: _isFullScreen 
-                    ? LinearGradient(colors: [
-                        Colors.orange.withOpacity(0.3), 
-                        Colors.red.withOpacity(0.2)
-                      ])
-                    : LinearGradient(colors: [
-                        Colors.blue.withOpacity(0.3), 
-                        Colors.purple.withOpacity(0.2)
-                      ]),
-                  border: Border.all(
-                    color: _isFullScreen ? Colors.orange : Colors.blue,
-                    width: 2,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: (_isFullScreen ? Colors.orange : Colors.blue).withOpacity(0.4),
-                      blurRadius: 12,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _isFullScreen 
-                        ? Icons.fullscreen_exit_rounded
-                        : Icons.fullscreen_rounded,
+
+          if (_currentUser == 'super_admin') ...[
+            const SizedBox(width: 12),
+            // زر الشاشة الكاملة
+            Tooltip(
+              message: _isFullScreen ? 'الخروج من الشاشة الكاملة (F11)' : 'الشاشة الكاملة (F11)',
+              child: InkWell(
+                onTap: _toggleFullScreen,
+                borderRadius: BorderRadius.circular(12),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    gradient: _isFullScreen 
+                      ? LinearGradient(colors: [
+                          Colors.orange.withOpacity(0.3), 
+                          Colors.red.withOpacity(0.2)
+                        ])
+                      : LinearGradient(colors: [
+                          Colors.blue.withOpacity(0.3), 
+                          Colors.purple.withOpacity(0.2)
+                        ]),
+                    border: Border.all(
                       color: _isFullScreen ? Colors.orange : Colors.blue,
-                      size: 20,
+                      width: 2,
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      _isFullScreen ? 'خروج' : 'ملء الشاشة',
-                      style: TextStyle(
-                        color: _isFullScreen ? Colors.orange : Colors.blue,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (_isFullScreen ? Colors.orange : Colors.blue).withOpacity(0.4),
+                        blurRadius: 12,
+                        offset: const Offset(0, 3),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _isFullScreen 
+                          ? Icons.fullscreen_exit_rounded
+                          : Icons.fullscreen_rounded,
+                        color: _isFullScreen ? Colors.orange : Colors.blue,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _isFullScreen ? 'خروج' : 'ملء الشاشة',
+                        style: TextStyle(
+                          color: _isFullScreen ? Colors.orange : Colors.blue,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );

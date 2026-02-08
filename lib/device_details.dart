@@ -219,10 +219,13 @@ class _DeviceDetailsState extends State<DeviceDetails>
         // ترتيب الأجهزة ترتيباً طبيعياً (الأرقام بشكل صحيح)
         allDevices.sort(_naturalSort);
 
+
         // 🚪 Force pop if device was reset/transferred from another client
         if (appState.shouldPop(widget.deviceName)) {
            WidgetsBinding.instance.addPostFrameCallback((_) {
-             if (mounted) Navigator.pop(context);
+             if (mounted && Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+             }
            });
         }
 
@@ -1591,11 +1594,11 @@ class ControlTab extends StatelessWidget {
                       'هل أنت متأكد من نقل بيانات ${deviceName} إلى ${device}؟\n\nسيتم نقل جميع البيانات (الوقت، الطلبات، الملاحظات) من الجهاز الحالي إلى الجهاز المختار.'
                     );
                     
+
                     if (confirm == true) {
                       appState.transferDeviceData(deviceName, device);
                       
-                      // العودة إلى الشاشة الرئيسية (نافذة PC)
-                      navigatorContext.pop(); // إغلاق شاشة الجهاز الحالية
+                      // Note: Automated pop in build() will handle closing the screen
                       
                       // عرض رسالة نجاح النقل في الشاشة الرئيسية
                       scaffoldContext.showSnackBar(
