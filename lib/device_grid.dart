@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'app_state.dart';
 import 'device_details.dart';
+
 import 'receipt_preview_screen.dart';
+import 'printer_service.dart';
 
 enum DeviceType { Pc, Arabia, Table, Billiard }
 
@@ -246,7 +248,12 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
   late AnimationController _busyController;
   late Animation<double> _busyAnimation;
   late AnimationController _controller;
+
   late Animation<double> _animation;
+
+  // Selection Mode State
+  bool _isSelectionMode = false;
+  final Set<String> _selectedDevices = {};
 
   @override
   void initState() {
@@ -368,8 +375,12 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
         break;
     }
 
+
     return Scaffold(
       backgroundColor: Colors.transparent,
+      bottomNavigationBar: _isSelectionMode && _selectedDevices.isNotEmpty
+          ? _buildBatchActionsBar(context)
+          : null,
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -416,6 +427,7 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
     return 1.1; // Default for desktop
   }
 
+
   int _getCrossAxisCount(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
     if (width > 1600) return 8;
@@ -425,6 +437,191 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
     if (width > 400) return 2;
     return 1; // For very small phones
   }
+
+  // شريط الإجراءات الجماعية
+  Widget _buildBatchActionsBar(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark 
+            ? const Color(0xFF1F1F23) 
+            : Colors.white,
+        border: Border(top: BorderSide(color: Colors.white.withOpacity(0.1))),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 10,
+            offset: const Offset(0, -4),
+          )
+        ],
+      ),
+      child: SafeArea(
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildBatchActionButton(
+              icon: Icons.play_arrow_rounded, 
+              label: 'بدء الوقت', 
+              color: Colors.green,
+              onTap: () => _performBatchAction('start'),
+            ),
+            _buildBatchActionButton(
+              icon: Icons.stop_rounded, 
+              label: 'إيقاف الوقت', 
+              color: Colors.orange,
+              onTap: () => _performBatchAction('stop'),
+            ),
+            _buildBatchActionButton(
+              icon: Icons.receipt_long_rounded, 
+              label: 'طباعة الفاتورة', 
+              color: Colors.blue,
+              onTap: () => _performBatchAction('print'),
+            ),
+             _buildBatchActionButton(
+              icon: Icons.cleaning_services_rounded, 
+              label: 'تفريغ', 
+              color: Colors.red,
+              onTap: () => _performBatchAction('clear'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBatchActionButton({required IconData icon, required String label, required Color color, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+       borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 24),
+            const SizedBox(height: 4),
+            Text(
+              label, 
+              style: TextStyle(
+                color: color, 
+                fontSize: 12, 
+                fontWeight: FontWeight.bold
+              )
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _performBatchAction(String action) async {
+    final appState = Provider.of<AppState>(context, listen: false);
+    final selectedDevicesList = _selectedDevices.toList();
+    
+    // فرز القائمة بالحجم الطبيعي
+    selectedDevicesList.sort((a, b) {
+      RegExp regExp = RegExp(r'^([a-zA-Z]+)(\d+)$');
+      var matchA = regExp.firstMatch(a);
+      var matchB = regExp.firstMatch(b);
+      if (matchA != null && matchB != null) {
+        int numA = int.parse(matchA.group(2)!);
+        int numB = int.parse(matchB.group(2)!);
+        return numA.compareTo(numB);
+      }
+      return a.compareTo(b);
+    });
+
+    if (selectedDevicesList.isEmpty) return;
+
+    if (action == 'clear') {
+         final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF1F1F23),
+            title: const Text('تأكيد التفريغ الجماعي', style: TextStyle(color: Colors.white)),
+            content: Text('هل أنت متأكد من تفريغ ${selectedDevicesList.length} أجهزة؟\nسيتم حذف جميع البيانات والطلبات.', style: const TextStyle(color: Colors.white70)),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true), 
+                child: const Text('تأكيد', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+    }
+
+    int successCount = 0;
+
+    for (var deviceName in selectedDevicesList) {
+      try {
+        switch (action) {
+          case 'start':
+            if (!appState.isRunning(deviceName)) {
+               appState.startTimer(deviceName);
+               successCount++;
+            }
+            break;
+            
+          case 'stop':
+            if (appState.isRunning(deviceName)) {
+               appState.stopTimer(deviceName);
+               successCount++;
+            }
+            break;
+            
+          case 'clear':
+             appState.resetDevice(deviceName);
+             successCount++;
+            break;
+            
+          case 'print':
+             final orders = appState.getOrders(deviceName);
+             // للتحقق من أن هناك شيء للطباعة (أو طباعة فاتورة فارغة للوقت فقط)
+             // عادةً نريد طباعة الفاتورة النهائية التي تشمل الوقت والطلبات
+             
+             // استخدام PrinterService لطباعة الفاتورة النهائية (CheckOut)
+             // نحتاج هنا لتكرار منطق CheckOut الموجود في DeviceDetails نوعاً ما
+             // أو استخدام دالة جاهزة. printCashierBill هي الأنسب.
+             
+             await PrinterService().printCashierBill(
+                  orders,
+                  tableName: deviceName,
+                  title: 'فاتورة نهائية',
+                );
+             successCount++;
+             // تأخير صغير بين كل طباعة لتجنب الضغط على الطابعة
+             await Future.delayed(const Duration(milliseconds: 500));
+            break;
+        }
+      } catch (e) {
+        print('Error performing batch action $action on $deviceName: $e');
+      }
+    }
+    
+    // بعد الانتهاء، اخرج من وضع الاختيار إذا كان تفريغ أو طباعة
+    if (action == 'clear' || action == 'print') {
+        setState(() {
+            _isSelectionMode = false;
+            _selectedDevices.clear();
+        });
+    }
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('تم تنفيذ الإجراء على $successCount جهاز'),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
 
   Widget _buildCategoryHeader(String title) {
     return Container(
@@ -477,6 +674,52 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
               ],
             ),
           ),
+
+          // Selection Mode Button
+          InkWell(
+            onTap: () {
+              setState(() {
+                _isSelectionMode = !_isSelectionMode;
+                if (!_isSelectionMode) {
+                  _selectedDevices.clear();
+                }
+              });
+            },
+            borderRadius: BorderRadius.circular(20),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                color: _isSelectionMode ? const Color(0xFFEC4899) : Colors.transparent,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.3),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    _isSelectionMode ? Icons.check_circle : Icons.select_all,
+                    color: _isSelectionMode ? Colors.white : Colors.white70,
+                    size: 16,
+                  ),
+                  if (_isSelectionMode) ...[
+                    const SizedBox(width: 6),
+                    Text(
+                      ' ${_selectedDevices.length}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
@@ -537,7 +780,10 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
         return TweenAnimationBuilder<double>(
           tween: Tween<double>(begin: 1, end: 1),
           duration: const Duration(milliseconds: 200),
+
           builder: (context, scale, child) {
+            final isSelected = _selectedDevices.contains(deviceName);
+            
             return Listener(
               onPointerDown: (_) => (context as Element).markNeedsBuild(),
               child: GestureDetector(
@@ -545,6 +791,17 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
                 onTapUp: (_) => (context as Element).markNeedsBuild(),
                 onTapCancel: () => (context as Element).markNeedsBuild(),
                 onTap: () {
+                  if (_isSelectionMode) {
+                    setState(() {
+                      if (isSelected) {
+                        _selectedDevices.remove(deviceName);
+                      } else {
+                        _selectedDevices.add(deviceName);
+                      }
+                    });
+                    return;
+                  }
+                  
                   Navigator.push(
                     context,
                     PageRouteBuilder(
@@ -557,8 +814,16 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
                     ),
                   );
                 },
+                onLongPress: () {
+                   if (!_isSelectionMode) {
+                     setState(() {
+                       _isSelectionMode = true;
+                       _selectedDevices.add(deviceName);
+                     });
+                   }
+                },
                 child: AnimatedScale(
-                  scale: scale,
+                  scale: isSelected ? 0.95 : scale,
                   duration: const Duration(milliseconds: 120),
                   curve: Curves.easeOutBack,
                   child: AnimatedContainer(
@@ -619,24 +884,26 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
                                 )),
                       borderRadius: BorderRadius.circular(28),
                       border: Border.all(
-                        color: isBusy
+                        color: _isSelectionMode && isSelected
+                            ? Colors.greenAccent
+                            : isBusy
                             ? const Color(0xFFEC4899).withOpacity(0.5)
                             : isDark
                                 ? Colors.white.withOpacity(0.12)
                                 : Colors.black.withOpacity(0.18),
-                        width: 2.2,
+                        width: _isSelectionMode && isSelected ? 4.0 : 2.2,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: widget.deviceType == DeviceType.Pc
+                          color: _isSelectionMode && isSelected
+                              ? Colors.greenAccent.withOpacity(0.4)
+                              : widget.deviceType == DeviceType.Pc
                               ? Colors.purpleAccent.withOpacity(0.25)
                               : widget.deviceType == DeviceType.Arabia
                                   ? Colors.blueAccent.withOpacity(0.22)
                                   : widget.deviceType == DeviceType.Table
                                       ? Colors.greenAccent.withOpacity(0.22)
-                                      : widget.deviceType == DeviceType.Billiard
-                                          ? Colors.greenAccent.withOpacity(0.22)
-                                          : (isBusy
+                                      : (isBusy
                                           ? const Color(0xFFEC4899).withOpacity(0.35)
                                           : isDark
                                               ? Colors.black.withOpacity(0.22)
@@ -655,6 +922,28 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
                                 // محتوى الكارت (فارغ ليظهر فقط الخلفية)
                                 Positioned.fill(child: Container()),
                                 
+                                // Selection Indicator
+                                if (_isSelectionMode)
+                                  Positioned(
+                                    top: 8,
+                                    left: 8,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: isSelected 
+                                            ? Colors.green 
+                                            : Colors.black.withOpacity(0.5),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(color: Colors.white, width: 2),
+                                      ),
+                                      child: const Icon(
+                                        Icons.check,
+                                        size: 16,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+
                                 // Preview Button (Top Right) - Only show if has orders
                                 if (hasOrders)
                                   Positioned(
