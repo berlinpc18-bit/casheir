@@ -581,22 +581,37 @@ class _DeviceGridState extends State<DeviceGrid> with TickerProviderStateMixin {
              successCount++;
             break;
             
+
           case 'print':
-             final orders = appState.getOrders(deviceName);
-             // للتحقق من أن هناك شيء للطباعة (أو طباعة فاتورة فارغة للوقت فقط)
-             // عادةً نريد طباعة الفاتورة النهائية التي تشمل الوقت والطلبات
+             // Get current orders
+             List<OrderItem> ordersToPrint = List.from(appState.getOrders(deviceName));
              
-             // استخدام PrinterService لطباعة الفاتورة النهائية (CheckOut)
-             // نحتاج هنا لتكرار منطق CheckOut الموجود في DeviceDetails نوعاً ما
-             // أو استخدام دالة جاهزة. printCashierBill هي الأنسب.
-             
+             // Calculate Time Price and add as item
+             final elapsed = appState.getElapsedTime(deviceName);
+             if (appState.isRunning(deviceName) || elapsed.inMinutes > 0) {
+                 final mode = appState.getMode(deviceName);
+                 final timePrice = appState.calculatePrice(deviceName, elapsed, mode);
+                 
+                 // Add Time as an OrderItem if valid price
+                 if (timePrice > 0) {
+                     ordersToPrint.add(OrderItem(
+                         name: 'وقت اللعب (${(elapsed.inMinutes / 60).toStringAsFixed(1)} ساعة)', 
+                         price: timePrice,
+                         quantity: 1,
+                         firstOrderTime: DateTime.now(),
+                         lastOrderTime: DateTime.now(),
+                     ));
+                 }
+             }
+
+             // Print Final Bill
              await PrinterService().printCashierBill(
-                  orders,
+                  ordersToPrint,
                   tableName: deviceName,
                   title: 'فاتورة نهائية',
                 );
              successCount++;
-             // تأخير صغير بين كل طباعة لتجنب الضغط على الطابعة
+             // Small delay between prints
              await Future.delayed(const Duration(milliseconds: 500));
             break;
         }

@@ -1337,10 +1337,11 @@ class AppState extends ChangeNotifier {
     print('=== clearDevice finished for: $deviceName ===');
   }
 
+
   // وظيفة جديدة لتصفير الطاولة دون حذفها
-  void resetDevice(String deviceName) {
+  void resetDevice(String deviceName, {bool forceClose = false}) {
     try {
-      print('=== resetDevice called for: $deviceName ===');
+      print('=== resetDevice called for: $deviceName (ForceClose: $forceClose) ===');
       
       // إيقاف العداد إذا كان يعمل
       _timers[deviceName]?.cancel();
@@ -1364,7 +1365,9 @@ class AppState extends ChangeNotifier {
       _billiardPrices.remove(deviceName);
       _ps4Prices.remove(deviceName);
 
-      _mustPopDevices.add(deviceName); // Signal UI to pop if on this page
+      if (forceClose) {
+         _mustPopDevices.add(deviceName); // Signal UI to pop if on this page
+      }
       
       print('Device $deviceName reset successfully');
       
