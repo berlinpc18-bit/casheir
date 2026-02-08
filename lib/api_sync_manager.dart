@@ -268,7 +268,7 @@ class ApiSyncManager {
   Future<void> updateDeviceStatus(
     String deviceId, {
     required bool isRunning,
-    required int elapsedSeconds,
+    required int time,
     required String mode,
     required int customerCount,
     String? notes,
@@ -279,7 +279,7 @@ class ApiSyncManager {
       await _apiClient.updateDeviceStatus(
         deviceId: deviceId,
         isRunning: isRunning,
-        elapsedSeconds: elapsedSeconds,
+        time: time,
         mode: mode,
         customerCount: customerCount,
         notes: notes,

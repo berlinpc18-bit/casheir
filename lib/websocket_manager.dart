@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'app_state.dart';
+import 'api_client.dart';
 
 class WebSocketManager {
   static final WebSocketManager _instance = WebSocketManager._internal();
@@ -13,7 +14,6 @@ class WebSocketManager {
   AppState? _appState;
   
   // ignore: constant_identifier_names
-  static const String WS_URL = 'ws://localhost:8080/ws';
   bool _isConnected = false;
   Timer? _reconnectTimer;
   Timer? _pingTimer;
@@ -30,9 +30,13 @@ class WebSocketManager {
   void connect() {
     if (_isConnected) return;
 
+    // Use dynamic URL based on ApiClient settings
+    final apiBaseUrl = ApiClient().baseUrl;
+    final wsUrl = apiBaseUrl.replaceFirst('http://', 'ws://').replaceFirst('https://', 'wss://') + '/ws';
+
     try {
-      print('🔌 Connecting to WebSocket at $WS_URL...');
-      _channel = WebSocketChannel.connect(Uri.parse(WS_URL));
+      print('🔌 Connecting to WebSocket at $wsUrl...');
+      _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
       
       _subscription = _channel!.stream.listen(
         (message) {
@@ -120,6 +124,7 @@ class WebSocketManager {
           break;
           
         case 'device_updated':
+        case 'device_update':
         case 'device_created': // Handle creation same as update
           _handleDeviceUpdate(data);
           break;
@@ -131,16 +136,19 @@ class WebSocketManager {
           break;
           
         case 'order_modified':
+        case 'order_updated':
           print('📝 Processing single order modification for ${data['deviceId']}');
           _handleOrderUpdated(data);
           break;
           
         case 'order_removed':
+        case 'order_deleted':
           print('🗑️ Processing order removal for ${data['deviceId']}');
           _handleOrderDeleted(data);
           break;
           
         case 'device_transferred':
+        case 'device_transfer':
           final fromId = data['fromDeviceId'];
           final toId = data['toDeviceId'];
           if (fromId != null && toId != null) {
@@ -156,6 +164,7 @@ class WebSocketManager {
           break;
 
         case 'device_cleared':
+        case 'device_reset':
           final deviceId = data['deviceId'];
           if (deviceId != null) {
             _appState!.resetDeviceFromSocket(deviceId);
@@ -184,7 +193,7 @@ class WebSocketManager {
       _appState!.updateDeviceStatusFromSocket(
         deviceId,
         isRunning: deviceData['isRunning'] ?? false,
-        elapsedSeconds: deviceData['elapsedSeconds'] ?? 0,
+        time: deviceData['time'] ?? deviceData['elapsedSeconds'] ?? 0,
         mode: deviceData['mode'] ?? 'single',
         customerCount: deviceData['customerCount'] ?? 1,
         notes: deviceData['notes'] ?? '',

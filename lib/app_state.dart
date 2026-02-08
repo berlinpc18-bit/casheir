@@ -114,29 +114,31 @@ class DeviceData {
 
   Map<String, dynamic> toJson() => {
         'name': name,
-        'elapsedTime': elapsedTime.inSeconds,
+        'time': elapsedTime.inSeconds,
         'isRunning': isRunning,
         'orders': orders.map((e) => e.toJson()).toList(),
         'reservations': reservations.map((e) => e.toJson()).toList(),
         'notes': notes,
         'mode': mode,
-        'customerCount': customerCount, // حفظ العدد
+        'customerCount': customerCount,
       };
 
-  factory DeviceData.fromJson(Map<String, dynamic> json) => DeviceData(
-        name: json['name'] ?? 'Unknown Device',
-        elapsedTime: Duration(seconds: json['elapsedTime'] ?? 0),
-        isRunning: json['isRunning'] ?? false,
-        orders: (json['orders'] as List?)
-            ?.map((e) => OrderItem.fromJson(e))
-            .toList() ?? [],
-        reservations: (json['reservations'] as List? ?? [])
-            .map((e) => ReservationItem.fromJson(e))
-            .toList(),
-        notes: json['notes'] ?? '',
-        mode: json['mode'] ?? 'single',
-        customerCount: json['customerCount'] ?? 1,
-      );
+  factory DeviceData.fromJson(Map<String, dynamic> json) {
+    return DeviceData(
+      name: json['name'] ?? 'Unknown Device',
+      elapsedTime: Duration(seconds: json['time'] ?? json['elapsedTime'] ?? json['elapsedSeconds'] ?? 0),
+      isRunning: json['isRunning'] ?? json['is_running'] ?? false,
+      orders: (json['orders'] as List?)
+          ?.map((e) => OrderItem.fromJson(e))
+          .toList() ?? [],
+      reservations: (json['reservations'] as List? ?? [])
+          .map((e) => ReservationItem.fromJson(e))
+          .toList(),
+      notes: json['notes'] ?? json['note'] ?? '', // Support both plural and singular from server
+      mode: json['mode'] ?? 'single',
+      customerCount: json['customerCount'] ?? json['customer_count'] ?? 1,
+    );
+  }
 }
 
 class AppState extends ChangeNotifier {
@@ -154,7 +156,7 @@ class AppState extends ChangeNotifier {
     ApiSyncManager().updateDeviceStatus(
       deviceId,
       isRunning: device.isRunning,
-      elapsedSeconds: device.elapsedTime.inSeconds,
+      time: device.elapsedTime.inSeconds,
       mode: device.mode,
       customerCount: device.customerCount,
       notes: device.notes,
@@ -162,11 +164,11 @@ class AppState extends ChangeNotifier {
     
     // WebSocket Sync (Broadcast to other clients)
     WebSocketManager().sendMessage({
-      'type': 'device_update', // Client -> Server uses 'device_update'
+      'type': 'device_update',
       'deviceId': deviceId,
       'data': {
         'isRunning': device.isRunning,
-        'elapsedSeconds': device.elapsedTime.inSeconds,
+        'time': device.elapsedTime.inSeconds,
         'mode': device.mode,
         'customerCount': device.customerCount,
         'notes': device.notes,
@@ -193,9 +195,20 @@ class AppState extends ChangeNotifier {
   // للتحكم في عمليات الحفظ المتزامنة
   bool _isSaving = false;
   
+  // Track devices that should force pop their details page (e.g. after remote transfer/reset)
+  Set<String> _mustPopDevices = {};
+  
   // Track devices being transferred to prevent deletion
   Set<String> _transferringDevices = {};
   
+  bool shouldPop(String deviceName) {
+    if (_mustPopDevices.contains(deviceName)) {
+      _mustPopDevices.remove(deviceName);
+      return true;
+    }
+    return false;
+  }
+
   // أسعار الأجهزة
   double _pcPrice = 1500.0; // سعر افتراضي عام للـ PC
   
@@ -1334,6 +1347,14 @@ class AppState extends ChangeNotifier {
     device.mode = 'single'; // إعادة تعيين الوضع إلى فردي
     device.customerCount = 1; // إعادة تعيين عدد الزبائن إلى 1
     
+    // Clear price overrides
+    _pcPrices.remove(deviceName);
+    _tablePrices.remove(deviceName);
+    _billiardPrices.remove(deviceName);
+    _ps4Prices.remove(deviceName);
+
+    _mustPopDevices.add(deviceName); // Signal UI to pop if on this page
+    
     print('Device $deviceName reset successfully');
     print('Orders: ${device.orders.length}, Reservations: ${device.reservations.length}');
     print('IsRunning: ${device.isRunning}, ElapsedTime: ${device.elapsedTime}');
@@ -1452,14 +1473,24 @@ class AppState extends ChangeNotifier {
       }
     }
 
+    // Transfer reservations
+    toData.reservations.addAll(fromData.reservations);
+
     toData.notes = fromData.notes;
     toData.mode = fromData.mode;
     toData.customerCount = fromData.customerCount;
+
+    // Transfer price settings if they exist
+    if (_pcPrices.containsKey(fromDevice)) _pcPrices[toDevice] = _pcPrices.remove(fromDevice)!;
+    if (_tablePrices.containsKey(fromDevice)) _tablePrices[toDevice] = _tablePrices.remove(fromDevice)!;
+    if (_billiardPrices.containsKey(fromDevice)) _billiardPrices[toDevice] = _billiardPrices.remove(fromDevice)!;
+    if (_ps4Prices.containsKey(fromDevice)) _ps4Prices[toDevice] = _ps4Prices.remove(fromDevice)!;
 
     // Reset source device to clean state (don't delete it)
     fromData.isRunning = false;
     fromData.elapsedTime = Duration.zero;
     fromData.orders.clear();
+    fromData.reservations.clear();
     fromData.notes = '';
     fromData.mode = 'single';
     fromData.customerCount = 1;
@@ -1473,6 +1504,7 @@ class AppState extends ChangeNotifier {
       startTimer(toDevice);
     }
 
+    _mustPopDevices.add(fromDevice); // Signal UI to pop if on this page
     notifyListeners();
     _saveToPrefs();
     
@@ -1494,6 +1526,15 @@ class AppState extends ChangeNotifier {
       await apiSync.transferDeviceViaApi(fromDevice, toDevice);
       print('✅ Device transfer synced to API: $fromDevice -> $toDevice');
       
+      // Force immediate HTTP sync for BOTH devices to ensure server state is 100% correct
+      // Sync destination (now has the data)
+      _syncDeviceToApi(toDevice);
+      _syncOrdersToApi(toDevice);
+      
+      // Sync source (now empty)
+      _syncDeviceToApi(fromDevice);
+      _syncOrdersToApi(fromDevice);
+
       // WebSocket Sync
       WebSocketManager().sendMessage({
         'type': 'device_transfer', // Client -> Server uses 'device_transfer'
@@ -1605,32 +1646,66 @@ class AppState extends ChangeNotifier {
   /// Update device from API response
   void updateDeviceFromApi(String deviceId, Map<String, dynamic> data) {
     try {
-      final deviceExisted = _devices.containsKey(deviceId);
-      final deviceCountBefore = _devices.length;
-      
-      final device = DeviceData.fromJson(data);
-      // ALWAYS use device.name as key locally to match Hive schema behavior
-      final localKey = device.name;
-      _devices[localKey] = device;
+      final name = data['name'] ?? deviceId;
+      final localKey = name;
       
       // Resurrect device if it was locally deleted
       if (_deletedDevices.contains(localKey)) {
         print('♻️ Resurrecting locally deleted device: $localKey');
         _deletedDevices.remove(localKey);
       }
-      
-      final deviceCountAfter = _devices.length;
-      
-      // Note: We don't broadcast here anymore because HTTP sync is meant to be a fetch,
-      // and local changes already broadcast themselves.
-      
-      notifyListeners();
-      
-      if (deviceExisted) {
-        print('✅ Updated device $deviceId from API (already existed)');
+
+      if (_devices.containsKey(localKey)) {
+        // 🔥 CRITICAL: Update EXISTING object to maintain timer references!
+        // DO NOT do: _devices[localKey] = DeviceData.fromJson(data);
+        final existing = _devices[localKey]!;
+        final newData = DeviceData.fromJson(data);
+        
+        bool changed = false;
+        if (existing.isRunning != newData.isRunning) {
+          existing.isRunning = newData.isRunning;
+          changed = true;
+        }
+        
+        // Jitter Buffer: Don't overwrite time if difference is small (< 5s)
+        // AND: Protect local time from being reset to 0 by a "lazy" server update
+        final timeDiff = (existing.elapsedTime.inSeconds - newData.elapsedTime.inSeconds).abs();
+        bool shouldUpdateTime = false;
+        
+        if (newData.elapsedTime.inSeconds > 0) {
+          // If server provides a non-zero time, follow it if diff is large
+          if (timeDiff > 5 || !existing.isRunning) {
+            shouldUpdateTime = true;
+          }
+        } else if (existing.elapsedTime.inSeconds > 0 && newData.elapsedTime.inSeconds == 0) {
+           // ⚠️ Server sent 0 but we have local time. 
+           // If it's a regular update (not a reset), IGNORE the 0 to prevent "Time Restart" bug.
+           print('⚠️ Ignoring 0-time update from API for ${existing.name} (Local time: ${existing.elapsedTime.inSeconds}s)');
+        }
+        
+        if (shouldUpdateTime) {
+          existing.elapsedTime = newData.elapsedTime;
+          changed = true;
+        }
+        
+        existing.mode = newData.mode;
+        existing.customerCount = newData.customerCount;
+        existing.notes = newData.notes;
+        
+        // Update orders as well
+        if (data.containsKey('orders')) {
+          existing.orders = newData.orders;
+          changed = true;
+        }
+
+        print('✅ Updated device $localKey from API (Maintaining memory reference)');
+        if (changed) notifyListeners();
       } else {
-        print('✅ ADDED NEW device $deviceId from API (devices: $deviceCountBefore → $deviceCountAfter)');
-        print('   📋 All devices now: ${_devices.keys.join(", ")}');
+        // ADD NEW
+        final newDevice = DeviceData.fromJson(data);
+        _devices[localKey] = newDevice;
+        notifyListeners();
+        print('✅ ADDED NEW device $localKey from API');
       }
     } catch (e) {
       print('❌ Error updating device from API: $e');
@@ -1832,41 +1907,90 @@ class AppState extends ChangeNotifier {
 
   void updateDeviceStatusFromSocket(String deviceId, {
     required bool isRunning,
-    required int elapsedSeconds,
+    required int time,
     required String mode,
     required int customerCount,
     required String notes,
   }) {
-    final device = _devices[deviceId] ?? DeviceData(name: deviceId);
-    if (!_devices.containsKey(deviceId)) {
-        _devices[deviceId] = device;
-    }
+    final device = _devices[deviceId];
     
-    // Resurrect device if it was locally deleted
-    if (_deletedDevices.contains(deviceId)) {
-      print('♻️ Resurrecting locally deleted device (socket): $deviceId');
-      _deletedDevices.remove(deviceId);
-    }
-    
-    // Update local state directly
-    device.isRunning = isRunning;
-    device.elapsedTime = Duration(seconds: elapsedSeconds);
-    device.mode = mode;
-    device.customerCount = customerCount;
-    device.notes = notes;
-    
-    // Manage local timer for visual smoothness
-    if (isRunning) {
-        if (!(_timers[deviceId]?.isActive ?? false)) {
-             _startLocalTimerOnly(deviceId);
+    if (device != null) {
+      // Check for actual changes to avoid unnecessary rebuilds and jitter
+      bool changed = false;
+      
+      if (device.isRunning != isRunning) {
+        device.isRunning = isRunning;
+        changed = true;
+      }
+      
+      // 🔥 JITTER BUFFER & ZERO PROTECTION: 
+      // 1. Only update if server's time is significantly different (diff > 5s).
+      // 2. PROTECT local time: If server sends 0 but we have local time, ignore it.
+      //    True resets come through 'device_reset' socket type, not 'device_update'.
+      final timeDiff = (device.elapsedTime.inSeconds - time).abs();
+      bool shouldUpdateTime = false;
+      
+      if (time > 0) {
+        if (timeDiff > 5 || !isRunning) {
+          shouldUpdateTime = true;
         }
+      } else if (device.elapsedTime.inSeconds > 0 && time == 0) {
+        print('⚠️ Ignoring 0-time socket update for ${device.name} (Local: ${device.elapsedTime.inSeconds}s)');
+      }
+      
+      if (shouldUpdateTime) {
+        device.elapsedTime = Duration(seconds: time);
+        changed = true;
+      }
+      
+      if (device.mode != mode) {
+        device.mode = mode;
+        changed = true;
+      }
+      
+      if (device.customerCount != customerCount) {
+        device.customerCount = customerCount;
+        changed = true;
+      }
+      
+      if (device.notes != notes) {
+        device.notes = notes;
+        changed = true;
+      }
+      
+      if (changed) {
+        // Manage local timer for visual smoothness
+        if (isRunning) {
+            if (!(_timers[deviceId]?.isActive ?? false)) {
+                 _startLocalTimerOnly(deviceId);
+            }
+        } else {
+            _timers[deviceId]?.cancel();
+            _timers.remove(deviceId);
+        }
+        
+        notifyListeners();
+        print('🔌 Device $deviceId updated from socket (Fields synced)');
+      }
     } else {
-        _timers[deviceId]?.cancel();
-        _timers.remove(deviceId);
+      // Handle new device arriving via socket
+      final newDevice = DeviceData(
+        name: deviceId,
+        isRunning: isRunning,
+        elapsedTime: Duration(seconds: time),
+        mode: mode,
+        customerCount: customerCount,
+        notes: notes,
+      );
+      _devices[deviceId] = newDevice;
+      
+      if (isRunning) {
+        _startLocalTimerOnly(deviceId);
+      }
+      
+      notifyListeners();
+      print('🔌 Created NEW device $deviceId from socket');
     }
-    
-    notifyListeners();
-    print('🔌 Device updated from socket: $deviceId');
   }
   
   void _startLocalTimerOnly(String deviceName) {
@@ -2000,6 +2124,14 @@ class AppState extends ChangeNotifier {
       device.notes = '';
       device.mode = 'single';
       device.customerCount = 1;
+      
+      // Clear price overrides
+      _pcPrices.remove(deviceId);
+      _tablePrices.remove(deviceId);
+      _billiardPrices.remove(deviceId);
+      _ps4Prices.remove(deviceId);
+
+      _mustPopDevices.add(deviceId); // Signal UI to pop if on this page
       notifyListeners();
       print('🔌 Device reset from socket: $deviceId');
   }
@@ -2023,14 +2155,24 @@ class AppState extends ChangeNotifier {
       }
     }
 
+    // Transfer reservations
+    toData.reservations.addAll(fromData.reservations);
+
     toData.notes = fromData.notes;
     toData.mode = fromData.mode;
     toData.customerCount = fromData.customerCount;
+
+    // Transfer price settings if they exist
+    if (_pcPrices.containsKey(fromDevice)) _pcPrices[toDevice] = _pcPrices.remove(fromDevice)!;
+    if (_tablePrices.containsKey(fromDevice)) _tablePrices[toDevice] = _tablePrices.remove(fromDevice)!;
+    if (_billiardPrices.containsKey(fromDevice)) _billiardPrices[toDevice] = _billiardPrices.remove(fromDevice)!;
+    if (_ps4Prices.containsKey(fromDevice)) _ps4Prices[toDevice] = _ps4Prices.remove(fromDevice)!;
 
     // Reset source device to clean state (don't delete it)
     fromData.isRunning = false;
     fromData.elapsedTime = Duration.zero;
     fromData.orders.clear();
+    fromData.reservations.clear();
     fromData.notes = '';
     fromData.mode = 'single';
     fromData.customerCount = 1;
@@ -2044,6 +2186,7 @@ class AppState extends ChangeNotifier {
       _startLocalTimerOnly(toDevice); // Use local timer only
     }
 
+    _mustPopDevices.add(fromDevice); // Signal UI to pop if on this page
     notifyListeners();
     print('🔌 Device transfer processed from socket: $fromDevice -> $toDevice');
   }

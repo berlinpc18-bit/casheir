@@ -22,6 +22,8 @@ import 'license_wrapper.dart';
 import 'printer_service.dart';
 import 'api_client.dart';
 import 'api_sync_manager.dart';
+import 'server_discovery_service.dart';
+import 'websocket_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -205,6 +207,39 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     
     // 🚀 Sync all data from API on app startup
     _syncDataFromApi();
+    
+    // 🔍 Auto-Discovery for Server
+    _setupServerDiscovery();
+  }
+
+  void _setupServerDiscovery() {
+    if (Platform.isAndroid || Platform.isIOS) {
+      print('🔍 Android: Starting Server Discovery...');
+      ServerDiscoveryService().startSearching((url) async {
+        final currentUrl = ApiClient().baseUrl;
+        if (currentUrl != url) {
+          print('✨ Auto-Connected to Server: $url');
+          await ApiClient().setBaseUrl(url);
+          // Reconnect services
+          WebSocketManager().dispose();
+          WebSocketManager().connect();
+          _syncDataFromApi();
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✅ تم الاتصال بالتلقائي بالخادم: $url'),
+                backgroundColor: Colors.green,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        }
+      });
+    } else if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+      print('🚀 Desktop: Starting Server Broadcast...');
+      ServerDiscoveryService().startBroadcasting();
+    }
   }
 
   Future<void> _syncDataFromApi() async {

@@ -176,7 +176,7 @@ class ApiClient {
     try {
       final response = await _httpClient.get(
         Uri.parse('$baseUrl/api/debts'),
-      ).timeout(const Duration(seconds: 30));
+      ).timeout(const Duration(seconds: 60));
       
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body) as Map;
@@ -308,7 +308,7 @@ class ApiClient {
   Future<Map<String, dynamic>> updateDeviceStatus({
     required String deviceId,
     required bool isRunning,
-    required int elapsedSeconds,
+    required int time,
     required String mode,
     required int customerCount,
     String? notes,
@@ -317,7 +317,7 @@ class ApiClient {
       final body = jsonEncode({
         'deviceId': deviceId,
         'isRunning': isRunning,
-        'elapsedSeconds': elapsedSeconds,
+        'time': time,
         'mode': mode,
         'customerCount': customerCount,
         if (notes != null) 'notes': notes,
@@ -400,7 +400,13 @@ class ApiClient {
   /// Get all products and categories hierarchy
   /// GET /api/products
   Future<Map<String, dynamic>> getProducts() async {
-    return _get('/api/products');
+    try {
+      final response = await _httpClient.get(Uri.parse('$baseUrl/api/products'))
+          .timeout(const Duration(seconds: 60));
+      return _processResponse(response);
+    } catch (e) {
+      throw ApiException('GET /api/products failed: $e');
+    }
   }
 
   /// Add a new product
@@ -456,7 +462,7 @@ class ApiClient {
   Future<Map<String, dynamic>> _get(String endpoint) async {
     try {
       final response = await _httpClient.get(Uri.parse('$baseUrl$endpoint'))
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 30));
       return _processResponse(response);
     } catch (e) {
       throw ApiException('GET $endpoint failed: $e');
@@ -478,7 +484,7 @@ class ApiClient {
         Uri.parse(fullUrl),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(data),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 30));
       return _processResponse(response);
     } catch (e) {
       throw ApiException('POST $endpoint failed: $e');
@@ -500,7 +506,7 @@ class ApiClient {
         Uri.parse(fullUrl),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(data),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 30));
       return _processResponse(response);
     } catch (e) {
       throw ApiException('PUT $endpoint failed: $e');
@@ -510,7 +516,7 @@ class ApiClient {
   Future<Map<String, dynamic>> _delete(String endpoint) async {
     try {
       final response = await _httpClient.delete(Uri.parse('$baseUrl$endpoint'))
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 30));
       return _processResponse(response);
     } catch (e) {
       throw ApiException('DELETE $endpoint failed: $e');

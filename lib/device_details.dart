@@ -219,6 +219,13 @@ class _DeviceDetailsState extends State<DeviceDetails>
         // ترتيب الأجهزة ترتيباً طبيعياً (الأرقام بشكل صحيح)
         allDevices.sort(_naturalSort);
 
+        // 🚪 Force pop if device was reset/transferred from another client
+        if (appState.shouldPop(widget.deviceName)) {
+           WidgetsBinding.instance.addPostFrameCallback((_) {
+             if (mounted) Navigator.pop(context);
+           });
+        }
+
         return Scaffold(
           backgroundColor: const Color(0xFF0A0A0A),
           appBar: AppBar(
@@ -631,7 +638,7 @@ class _DeviceDetailsState extends State<DeviceDetails>
                                                             ),
                                                             const SizedBox(height: 4),
                                                             Text(
-                                                              running ? 'إيقاف' : 'بدء',
+                                                              running ? 'توقف مؤقت' : 'بدء',
                                                               style: const TextStyle(
                                                                 color: Colors.white,
                                                                 fontWeight: FontWeight.w600,
