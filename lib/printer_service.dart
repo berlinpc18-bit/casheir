@@ -1,4 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import 'auth_service.dart';
+import 'websocket_manager.dart';
+import 'dart:io';
 import 'package:printing/printing.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/pdf.dart';
@@ -296,6 +299,29 @@ class PrinterService {
   }) async {
     if (orders.isEmpty) return;
     
+
+    // إذا كان الجهاز أندرويد، أرسل الأمر للسيرفر ليطبعه بدلاً من الطباعة محلياً
+    if (Platform.isAndroid) {
+      print('📱 Android Device Detected: Sending print request to Server...');
+      
+      try {
+        final orderJsonList = orders.map((o) => o.toJson()).toList();
+        
+        WebSocketManager().sendMessage({
+          'type': 'print_order',
+          'deviceId': tableName ?? 'Android Client',
+          'tableName': tableName ?? 'Android Client',
+          'orders': orderJsonList,
+          'timestamp': DateTime.now().toIso8601String(),
+        });
+        
+        print('✅ Print request sent to server successfully');
+        return; // توقف هنا، لا تكمل الطباعة المحلية
+      } catch (e) {
+        print('❌ Failed to send print request to server: $e');
+      }
+    }
+
     // تأكد من تحميل الإعدادات أولاً
     await ensureInitialized();
 
@@ -422,6 +448,28 @@ class PrinterService {
     String? tableName,
     pw.ImageProvider? logoImage,
   }) async {
+
+    // Android Support: Send Bill to Server
+    if (Platform.isAndroid) {
+      try {
+        final orderJsonList = orders.map((o) => o.toJson()).toList();
+        
+        WebSocketManager().sendMessage({
+          'type': 'print_bill',
+          'deviceId': tableName ?? 'Android Client',
+          'tableName': tableName ?? 'Android Client',
+          'title': title ?? 'فاتورة نهائية',
+          'orders': orderJsonList,
+          'timestamp': DateTime.now().toIso8601String(),
+        });
+        
+        print('✅ Bill print request sent to server');
+        return;
+      } catch (e) {
+        print('❌ Failed to send bill request: $e');
+      }
+    }
+
     if (!_printCashierReceipts || orders.isEmpty) return;
 
     final pdf = await _createUnifiedReceipt(
@@ -667,12 +715,33 @@ pw.Widget _td(String text, pw.Font font) => pw.Padding(
 
 
 
+
+
+  // دالة للتحقق من صلاحيات الطباعة (فقط super_admin)
+  Future<bool> _canPrint() async {
+    final authService = AuthService();
+    if (!await authService.isLoggedIn()) {
+       print('🚫 Printing blocked: Not logged in');
+       return false;
+    }
+    
+    final username = await authService.getLoggedInUsername();
+    if (username != 'super_admin') {
+      print('🚫 Printing blocked: User "$username" is not super_admin');
+      return false;
+    }
+    return true;
+  }
+
   // طباعة على طابعة الشبكة باستخدام عنوان IP المكون
   Future<void> _printToNetworkPrinter(
     pw.Document pdf, 
     String printerIP, {
     String? name,
   }) async {
+    // التحقق من الصلاحيات قبل الطباعة
+    if (!await _canPrint()) return;
+
     try {
       // if (printerIP.isEmpty) {
       //   print('⚠️ لم يتم تحديد عنوان IP للطابعة، استخدام الطابعة الافتراضية');
@@ -688,16 +757,36 @@ pw.Widget _td(String text, pw.Font font) => pw.Padding(
       // البحث عن الطابعة المطابقة للـ IP أو الاسم
       Printer? selectedPrinter;
             print('printerIP: $printerIP');
-      print(selectedPrinter.toString());
+
       for (var printer in printers) {
-        // محاولة المطابقة بـ IP أو الاسم
-        if ((printer.url?.contains(printerIP) ?? false) && printerIP.isNotEmpty && printerIP != null) {
-          selectedPrinter = printer;
-          print('✅ تم العثور على الطابعة: ${printer.name}');
+        // print('Checking printer: ${printer.name} | URL: ${printer.url}');
+        
+
+        // إذا كان IP فارغ، نستخدم الطابعة الافتراضية
+        if (printerIP.isEmpty) {
+          print('⚠️ لم يتم تحديد طابعة، سيتم استخدام الطابعة الافتراضية');
           break;
         }
 
+        // محاولة المطابقة بـ IP أو الاسم أو URL
+        if (printerIP.isNotEmpty) {
+          // تطابق مع URL (غالباً يحتوي على IP)
+          if (printer.url != null && printer.url!.contains(printerIP)) {
+             selectedPrinter = printer;
+             print('✅ Found by URL: ${printer.name} ($printerIP)');
+          }
+           // تطابق مع الاسم (إذا كان المستخدم أدخل الاسم بدلاً من IP)
+          else if (printer.name.toLowerCase().contains(printerIP.toLowerCase())) {
+             selectedPrinter = printer;
+             print('✅ Found by Name: ${printer.name} ($printerIP)');
+          }
+        }
+
+        // إذا وجدنا الطابعة، نخرج من الحلقة
+        if (selectedPrinter != null) break;
       }
+
+
       
       // إذا لم يتم العثور على طابعة محددة، استخدام الطابعة الافتراضية
       if (selectedPrinter == null) {

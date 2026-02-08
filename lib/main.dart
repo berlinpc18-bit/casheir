@@ -208,8 +208,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     // 🚀 Sync all data from API on app startup
     _syncDataFromApi();
     
-    // 🔍 Auto-Discovery for Server
-    _setupServerDiscovery();
+    // 🔍 Auto-Discovery for Server (Disabled per user request to stop auto-connect issues)
+    // _setupServerDiscovery();
   }
 
   void _setupServerDiscovery() {

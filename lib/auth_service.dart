@@ -10,6 +10,7 @@ class AuthService {
   static const String _loginTimeKey = 'login_time';
 
   static final Map<String, String> _users = {
+    'super_admin': "super_admin",
     'zoro': '1q2w3e1998',
     'dvksig': '472963',
     'fkbskg': '299638',

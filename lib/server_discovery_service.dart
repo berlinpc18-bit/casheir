@@ -18,8 +18,14 @@ class ServerDiscoveryService {
   Timer? _broadcastTimer;
   bool _isSearching = false;
 
+
   /// Start broadcasting the server URL (Call this on the PC/Server side)
   Future<void> startBroadcasting() async {
+    // DISCOVERY COMPLETELY DISABLED
+    print('🚫 Server Discovery Broadcast is DISABLED by user request.');
+    return;
+    
+    /*
     if (kIsWeb) return;
     
     try {
@@ -43,6 +49,7 @@ class ServerDiscoveryService {
     } catch (e) {
       print('❌ Error starting discovery broadcast: $e');
     }
+    */
   }
 
   void _sendDiscoveryPacket(String url) {
@@ -59,8 +66,14 @@ class ServerDiscoveryService {
     _socket!.send(bytes, InternetAddress('255.255.255.255'), discoveryPort);
   }
 
+
   /// Start searching for the server (Call this on the Android/Client side)
   Future<void> startSearching(Function(String url) onServerFound) async {
+    // DISCOVERY COMPLETELY DISABLED
+    print('🚫 Server Discovery Search is DISABLED by user request.');
+    return;
+
+    /*
     if (_isSearching || kIsWeb) return;
     _isSearching = true;
 
@@ -91,6 +104,7 @@ class ServerDiscoveryService {
       print('❌ Error searching for server: $e');
       _isSearching = false;
     }
+    */
   }
 
   Future<String?> _getLocalIp() async {

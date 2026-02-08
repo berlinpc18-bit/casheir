@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'app_state.dart';
+import 'auth_service.dart';
+import 'printer_service.dart';
 import 'api_client.dart';
 
 class WebSocketManager {
@@ -164,11 +166,23 @@ class WebSocketManager {
           break;
 
         case 'device_cleared':
+
         case 'device_reset':
           final deviceId = data['deviceId'];
           if (deviceId != null) {
             _appState!.resetDeviceFromSocket(deviceId);
           }
+          break;
+
+
+        case 'print_order':
+          print('🖨️ Received remote print request');
+          _handleRemotePrint(data);
+          break;
+
+        case 'print_bill':
+          print('🧾 Received remote bill request');
+          _handleRemoteBill(data);
           break;
 
         // Add more handlers as strictly needed
@@ -239,6 +253,80 @@ class WebSocketManager {
      }
   }
   
+  Future<void> _handleRemotePrint(Map<String, dynamic> data) async {
+    final authService = AuthService();
+    if (!await authService.isLoggedIn()) {
+      print('🚫 Ignoring remote print: Not logged in');
+      return;
+    }
+
+    final username = await authService.getLoggedInUsername();
+    if (username != 'super_admin') {
+      print('🚫 Ignoring remote print: User "$username" is not authorized');
+      return;
+    }
+
+    try {
+      final List<dynamic> ordersList = data['orders'] ?? [];
+      if (ordersList.isEmpty) return;
+
+      final orders = ordersList.map((o) => OrderItem.fromJson(o)).toList();
+      final tableName = data['tableName'] ?? data['deviceId'];
+
+      // Build specific category map for this print job
+      Map<String, String> itemToCategoryMap = {};
+      if (_appState != null) {
+        _appState!.customCategories.forEach((cat, items) {
+          for (var item in items) itemToCategoryMap[item] = cat;
+        });
+      }
+
+      print('🖨️ Authorized Remote Print: ${orders.length} items for $tableName');
+      
+      await PrinterService().printOrdersByCategory(
+        orders,
+        itemToCategoryMap,
+        tableName: tableName,
+      );
+    } catch (e) {
+      print('❌ Remote Print Error: $e');
+    }
+  }
+
+
+  Future<void> _handleRemoteBill(Map<String, dynamic> data) async {
+    final authService = AuthService();
+    if (!await authService.isLoggedIn()) {
+      print('🚫 Ignoring remote bill: Not logged in');
+      return;
+    }
+
+    final username = await authService.getLoggedInUsername();
+    if (username != 'super_admin') {
+      print('🚫 Ignoring remote bill: User "$username" is not authorized');
+      return;
+    }
+
+    try {
+      final List<dynamic> ordersList = data['orders'] ?? [];
+      if (ordersList.isEmpty) return;
+
+      final orders = ordersList.map((o) => OrderItem.fromJson(o)).toList();
+      final tableName = data['tableName'] ?? data['deviceId'] ?? 'Unknown';
+      final title = data['title'] ?? 'فاتورة نهائية';
+
+      print('🧾 Authorized Remote Bill: ${orders.length} items for $tableName');
+      
+      await PrinterService().printCashierBill(
+        orders,
+        tableName: tableName,
+        title: title,
+      );
+    } catch (e) {
+      print('❌ Remote Bill Error: $e');
+    }
+  }
+
   void dispose() {
     _subscription?.cancel();
     _channel?.sink.close();
