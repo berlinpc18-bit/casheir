@@ -1015,12 +1015,12 @@ class AppState extends ChangeNotifier {
     _syncDeviceToApi(deviceName);
   }
 
-  void startTimer(String deviceName) {
+  void startTimer(String deviceName, {bool sync = true}) {
     if (_timers[deviceName] != null) return;
     final device = getDeviceData(deviceName);
     device.isRunning = true;
     
-    print('⏰ بدء المؤقت للجهاز: $deviceName');
+    print('⏰ بدء المؤقت للجهاز: $deviceName (Sync: $sync)');
 
     // عداد للحفظ كل 30 ثانية بدلاً من كل ثانية
     var saveCounter = 0;
@@ -1036,33 +1036,43 @@ class AppState extends ChangeNotifier {
       if (saveCounter >= 30 || minutes % 5 == 0 && device.elapsedTime.inSeconds % 60 == 0) {
         _saveToPrefs();
         saveCounter = 0;
-        print('💾 حفظ تلقائي للمؤقت: $deviceName - الوقت: ${device.elapsedTime.toString().substring(0, 7)}');
+        final durationStr = device.elapsedTime.toString().split('.').first;
+        print('💾 حفظ تلقائي للمؤقت: $deviceName - الوقت: $durationStr');
         _syncDeviceToApi(deviceName); // Auto-sync to API
       }
     });
 
-    // حفظ فوري عند بدء المؤقت
     notifyListeners();
-    _saveToPrefs();
-    print('✅ تم بدء وحفظ المؤقت: $deviceName');
-    _syncDeviceToApi(deviceName);
+    
+    if (sync) {
+      // حفظ فوري عند بدء المؤقت (فقط إذا كان التزامن مطلوباً)
+      _saveToPrefs();
+      print('✅ تم بدء وحفظ المؤقت: $deviceName');
+      _syncDeviceToApi(deviceName);
+    }
   }
 
   void stopTimer(String deviceName) {
-    final device = getDeviceData(deviceName);
-    device.isRunning = false;
-    _timers[deviceName]?.cancel();
-    _timers.remove(deviceName);
-    
-    print('⏸️ إيقاف المؤقت للجهاز: $deviceName - إجمالي الوقت: ${device.elapsedTime.toString().substring(0, 7)}');
-    
-    // حفظ فوري + طارئ عند إيقاف المؤقت (مهم جداً!)
-    notifyListeners();
-    _saveToPrefs();
-    _emergencySave();
-    
-    print('✅ تم حفظ إيقاف المؤقت: $deviceName');
-    _syncDeviceToApi(deviceName);
+    try {
+      final device = getDeviceData(deviceName);
+      device.isRunning = false;
+      _timers[deviceName]?.cancel();
+      _timers.remove(deviceName);
+      
+      // Calculate display time safely
+      final durationStr = device.elapsedTime.toString().split('.').first;
+      print('⏸️ إيقاف المؤقت للجهاز: $deviceName - إجمالي الوقت: $durationStr');
+      
+      // حفظ فوري + طارئ عند إيقاف المؤقت (مهم جداً!)
+      notifyListeners();
+      _saveToPrefs();
+      _emergencySave();
+      
+      print('✅ تم حفظ إيقاف المؤقت: $deviceName');
+      _syncDeviceToApi(deviceName);
+    } catch (e) {
+      print('❌ خطأ في إيقاف المؤقت: $e');
+    }
   }
 
   void resetTimerOnly(String deviceName) {
@@ -1329,56 +1339,57 @@ class AppState extends ChangeNotifier {
 
   // وظيفة جديدة لتصفير الطاولة دون حذفها
   void resetDevice(String deviceName) {
-    print('=== resetDevice called for: $deviceName ===');
-    
-    // إيقاف العداد إذا كان يعمل
-    _timers[deviceName]?.cancel();
-    _timers.remove(deviceName);
-    
-    // الحصول على بيانات الجهاز
-    final device = getDeviceData(deviceName);
-    
-    // تصفير جميع البيانات مع الحفاظ على الجهاز
-    device.orders.clear();
-    device.reservations.clear();
-    device.isRunning = false;
-    device.elapsedTime = Duration.zero;
-    device.notes = '';
-    device.mode = 'single'; // إعادة تعيين الوضع إلى فردي
-    device.customerCount = 1; // إعادة تعيين عدد الزبائن إلى 1
-    
-    // Clear price overrides
-    _pcPrices.remove(deviceName);
-    _tablePrices.remove(deviceName);
-    _billiardPrices.remove(deviceName);
-    _ps4Prices.remove(deviceName);
-
-    _mustPopDevices.add(deviceName); // Signal UI to pop if on this page
-    
-    print('Device $deviceName reset successfully');
-    print('Orders: ${device.orders.length}, Reservations: ${device.reservations.length}');
-    print('IsRunning: ${device.isRunning}, ElapsedTime: ${device.elapsedTime}');
-    print('Mode: ${device.mode}, CustomerCount: ${device.customerCount}');
-    
-    notifyListeners();
-    
-    // حفظ البيانات
-    _saveToPrefs().then((_) {
-      print('resetDevice: Save completed for $deviceName');
-      _syncDeviceToApi(deviceName);
-      _syncOrdersToApi(deviceName);
+    try {
+      print('=== resetDevice called for: $deviceName ===');
       
-      // WebSocket Sync
-      WebSocketManager().sendMessage({
-        'type': 'device_reset',
-        'deviceId': deviceName,
-        'timestamp': DateTime.now().toIso8601String(),
+      // إيقاف العداد إذا كان يعمل
+      _timers[deviceName]?.cancel();
+      _timers.remove(deviceName);
+      
+      // الحصول على بيانات الجهاز
+      final device = getDeviceData(deviceName);
+      
+      // تصفير جميع البيانات مع الحفاظ على الجهاز
+      device.orders.clear();
+      device.reservations.clear();
+      device.isRunning = false;
+      device.elapsedTime = Duration.zero;
+      device.notes = '';
+      device.mode = 'single'; // إعادة تعيين الوضع إلى فردي
+      device.customerCount = 1; // إعادة تعيين عدد الزبائن إلى 1
+      
+      // Clear price overrides
+      _pcPrices.remove(deviceName);
+      _tablePrices.remove(deviceName);
+      _billiardPrices.remove(deviceName);
+      _ps4Prices.remove(deviceName);
+
+      _mustPopDevices.add(deviceName); // Signal UI to pop if on this page
+      
+      print('Device $deviceName reset successfully');
+      
+      notifyListeners();
+      
+      // حفظ البيانات
+      _saveToPrefs().then((_) {
+        print('resetDevice: Save completed for $deviceName');
+        _syncDeviceToApi(deviceName);
+        _syncOrdersToApi(deviceName);
+        
+        // WebSocket Sync
+        WebSocketManager().sendMessage({
+          'type': 'device_reset',
+          'deviceId': deviceName,
+          'timestamp': DateTime.now().toIso8601String(),
+        });
+      }).catchError((error) {
+        print('resetDevice: Save failed for $deviceName: $error');
       });
-    }).catchError((error) {
-      print('resetDevice: Save failed for $deviceName: $error');
-    });
-    
-    print('=== resetDevice finished for: $deviceName ===');
+      
+      print('=== resetDevice finished for: $deviceName ===');
+    } catch (e) {
+      print('❌ Error in resetDevice: $e');
+    }
   }
 
   Future<bool> clearAllDevicesWithConfirm(BuildContext context) async {
@@ -1673,11 +1684,13 @@ class AppState extends ChangeNotifier {
         bool shouldUpdateTime = false;
         
         if (newData.elapsedTime.inSeconds > 0) {
-          // If server provides a non-zero time, follow it if diff is large
-          if (timeDiff > 5 || !existing.isRunning) {
+          // Force update if server time is ahead or significantly different
+          // Reduce Jitter Buffer to 2s to catch up faster
+          if (timeDiff > 2 || !existing.isRunning) {
             shouldUpdateTime = true;
           }
-        } else if (existing.elapsedTime.inSeconds > 0 && newData.elapsedTime.inSeconds == 0) {
+        }
+ else if (existing.elapsedTime.inSeconds > 0 && newData.elapsedTime.inSeconds == 0) {
            // ⚠️ Server sent 0 but we have local time. 
            // If it's a regular update (not a reset), IGNORE the 0 to prevent "Time Restart" bug.
            print('⚠️ Ignoring 0-time update from API for ${existing.name} (Local time: ${existing.elapsedTime.inSeconds}s)');
@@ -1698,12 +1711,31 @@ class AppState extends ChangeNotifier {
           changed = true;
         }
 
+        // 🔥 Start timer if server says running but not running locally
+        if (existing.isRunning && _timers[localKey] == null) {
+           print('⏰ Auto-Starting timer for $localKey (Sync from server)');
+           startTimer(localKey, sync: false); // Don't sync back immediately to avoid loop
+        } else if (!existing.isRunning && _timers[localKey] != null) {
+           print('⏸️ Auto-Stopping timer for $localKey (Sync from server)');
+           // Use low-level stop to avoid trigger sync
+           _timers[localKey]?.cancel();
+           _timers.remove(localKey);
+           notifyListeners();
+        }
+
         print('✅ Updated device $localKey from API (Maintaining memory reference)');
         if (changed) notifyListeners();
       } else {
         // ADD NEW
         final newDevice = DeviceData.fromJson(data);
         _devices[localKey] = newDevice;
+        
+        // Start timer if running on server
+        if (newDevice.isRunning) {
+           print('⏰ Auto-Starting timer for NEW device $localKey');
+           startTimer(localKey, sync: false);
+        }
+        
         notifyListeners();
         print('✅ ADDED NEW device $localKey from API');
       }
